@@ -61,6 +61,7 @@ const basisConfig = {
   jahre: 20,
   wertsteigerung: 0.02,
   altRendite: 0.05,
+  sollzinsUnterdeckung: 0.09,  // Zins auf negatives Seitenportfolio (Dispo/Lombard)
   verfügbaresKapital: 100000,
   verkaufAktiv: false,
   veräußerungskosten: 0,       // bei Verkauf: Makler, Vorfälligkeitsentschädigung
@@ -250,6 +251,14 @@ test('berechneDarlehen: EK > Anschaffungskosten → Darlehen 0', () => {
   assert.equal(d.zins[0], 0);
   assert.equal(d.restschuld[0], 0);
 });
+
+test('berechneDarlehen: hoher Anschlusszins → keine negative Amortisation (Re-Annuisierung)', () => {
+  const d = berechneDarlehen({ ...finB, zinsbindung: 5, anschlusszins: 0.12 }, 333210, 15);
+  // trotz 12% Anschlusszins muss die Restschuld weiter fallen, nie wachsen
+  for (let i = 1; i < d.restschuld.length; i++) {
+    assert.ok(d.restschuld[i] <= d.restschuld[i - 1] + 1e-6, `Jahr ${i + 1}: Restschuld steigt`);
+  }
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -267,13 +276,15 @@ export function berechneDarlehen(finanzierung, anschaffungskosten, jahre) {
   const tilgung = [];
   const restschuld = [];
 
-  // Annuität aus Anfangsdarlehen; nach Zinsbindung Rate konstant, nur Split ändert sich.
-  const annuitätJahr = darlehen * (finanzierung.sollzins + finanzierung.anfTilgung);
-  const monatsrate = annuitätJahr / 12;
+  // Annuität aus Anfangsdarlehen; beim Anschluss einmal neu annuisiert (verhindert neg. Amortisation).
+  let monatsrate = (darlehen * (finanzierung.sollzins + finanzierung.anfTilgung)) / 12;
   let rest = darlehen;
 
   for (let t = 1; t <= jahre; t++) {
     const aktuellerZins = t <= finanzierung.zinsbindung ? finanzierung.sollzins : finanzierung.anschlusszins;
+    if (t === finanzierung.zinsbindung + 1) {
+      monatsrate = (rest * (finanzierung.anschlusszins + finanzierung.anfTilgung)) / 12; // Re-Annuisierung
+    }
     let zinsJahr = 0;
     let tilgungJahr = 0;
     for (let m = 0; m < 12 && rest > 0; m++) {
@@ -300,7 +311,7 @@ export function berechneDarlehen(finanzierung, anschaffungskosten, jahre) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test`
-Expected: PASS (6 tests total).
+Expected: PASS (7 tests total).
 
 - [ ] **Step 5: Commit**
 
@@ -409,7 +420,9 @@ export function berechneSzenario(config, finanzierung) {
     const immobilienwert = config.kaufpreis * Math.pow(1 + config.wertsteigerung, t);
     const immobilienEK = immobilienwert - restschuld;
 
-    const portfolio = portfolioVor * (1 + config.altRendite) + cashflowNachSteuer;
+    // positives Portfolio wächst mit altRendite; Unterdeckung mit teurerem Sollzins
+    const satz = portfolioVor >= 0 ? config.altRendite : config.sollzinsUnterdeckung;
+    const portfolio = portfolioVor * (1 + satz) + cashflowNachSteuer;
     portfolioVor = portfolio;
     const gesamtvermögen = immobilienEK + portfolio;
 
@@ -426,7 +439,7 @@ export function berechneSzenario(config, finanzierung) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test`
-Expected: PASS (11 tests total).
+Expected: PASS (12 tests total).
 
 - [ ] **Step 5: Commit**
 
@@ -447,13 +460,14 @@ git commit -m "feat: berechneSzenario (Miete, Steuer, Cashflow, Vermögen, Seite
 - Consumes: `reihe` (from `berechneSzenario`), `config`, `finanzierung`; `berechneVorab` for `anschaffungskosten` and `afaKumuliert` for Spekulationssteuer.
 - Produces:
   - `irr(zahlungen: number[]) → number` — internal rate of return via bisection; `zahlungen[0]` is the initial outflow (negative).
-  - `berechneKennzahlen(reihe, config, finanzierung) → { cashflowM1, breakEvenJahr, restschuldN, endvermögen, irr }`. `breakEvenJahr` = first year (1-based) with `cashflowNachSteuer ≥ 0`, else `null`.
+  - `berechneKennzahlen(reihe, config, finanzierung) → { cashflowM1, breakEvenJahr, amortisationJahr, restschuldN, immobilienEK_N, endvermögen, terminalNetto, irr }`. `breakEvenJahr` = first year (1-based) with annual `cashflowNachSteuer ≥ 0`; `amortisationJahr` = first year where cumulative `cashflowNachSteuer ≥ 0`; both `null` if never. `terminalNetto` = net liquidation value (used as IRR terminal in BOTH sale/no-sale for comparability). `endvermögen` = realized net if `verkaufAktiv`, else gross book `gesamtvermögen`.
+  - `kritischeAltRendite(config, finA, finB) → number | null` — the `altRendite` where `endvermögen_A = endvermögen_B` (bisection over [0, 0.20]); `null` if one scenario dominates across the whole range.
 
 - [ ] **Step 1: Write the failing test**
 
 Append to `test.mjs`:
 ```js
-import { irr, berechneKennzahlen } from './calc.js';
+import { irr, berechneKennzahlen, kritischeAltRendite } from './calc.js';
 
 test('irr: bekannte Zahlungsreihe', () => {
   assert.ok(Math.abs(irr([-100, 110]) - 0.10) < 1e-4, `irr=${irr([-100, 110])}`);
@@ -474,6 +488,28 @@ test('berechneKennzahlen: Verkauf aktiv verändert Endvermögen', () => {
   const kMitVerkauf = berechneKennzahlen(r, { ...basisConfig, verkaufAktiv: true }, finB);
   const kOhne = berechneKennzahlen(berechneSzenario(basisConfig, finB), basisConfig, finB);
   assert.notEqual(Math.round(kMitVerkauf.endvermögen), Math.round(kOhne.endvermögen));
+});
+
+test('berechneKennzahlen: terminalNetto ≤ Buchwert-EK bei N<10 (Kosten/Steuer abgezogen)', () => {
+  const cfg = { ...basisConfig, jahre: 8, veräußerungskosten: 5000 };
+  const k = berechneKennzahlen(berechneSzenario(cfg, finB), cfg, finB);
+  assert.ok(k.terminalNetto <= k.immobilienEK_N, 'netto darf Buchwert nicht übersteigen');
+  assert.ok(k.terminalNetto < k.immobilienEK_N, 'Kosten+latente Steuer senken den Wert');
+});
+
+test('kritischeAltRendite: Umschlagpunkt A↔B liegt im Intervall oder null', () => {
+  const kr = kritischeAltRendite(basisConfig, finA, finB);
+  assert.ok(kr === null || (kr > 0 && kr < 0.20), `kr=${kr}`);
+  if (kr !== null) {
+    const ev = (alt, fin) => {
+      const c = { ...basisConfig, altRendite: alt };
+      return berechneKennzahlen(berechneSzenario(c, fin), c, fin).endvermögen;
+    };
+    // unterhalb: mehr EK (A) vorn; oberhalb: weniger EK (B) vorn → Vorzeichenwechsel
+    const unten = ev(kr - 0.02, finA) - ev(kr - 0.02, finB);
+    const oben = ev(kr + 0.02, finA) - ev(kr + 0.02, finB);
+    assert.ok(unten * oben < 0, 'Endvermögen-Differenz wechselt Vorzeichen um kr');
+  }
 });
 ```
 
@@ -505,45 +541,71 @@ export function berechneKennzahlen(reihe, config, finanzierung) {
   const beIdx = reihe.findIndex((z) => z.cashflowNachSteuer >= 0);
   const breakEvenJahr = beIdx === -1 ? null : beIdx + 1;
   const restschuldN = reihe[N - 1].restschuld;
+  const immobilienEK_N = reihe[N - 1].immobilienEK;
 
-  // Endvermögen: mit oder ohne Verkauf (spec §3.7)
-  let endvermögen;
-  let letzterZahlungszuschlag; // wird zur letzten IRR-Zahlung addiert
-  if (config.verkaufAktiv) {
-    const { anschaffungskosten } = berechneVorab(config);
-    const { afaKumuliert } = berechneAfa(config, berechneVorab(config).afaBasis, N);
-    const stEff = config.grenzsteuersatz * (config.soliKirche ? 1.055 : 1);
-    const verkaufspreis = reihe[N - 1].immobilienwert;
-    const vk = config.veräußerungskosten || 0; // Makler, Vorfälligkeitsentschädigung
-    let spekusteuer = 0;
-    if (N < 10) {
-      const gewinn = verkaufspreis - (anschaffungskosten - afaKumuliert[N - 1]) - vk;
-      spekusteuer = Math.max(gewinn, 0) * stEff;
-    }
-    const nettoVerkaufserlös = verkaufspreis - restschuldN - spekusteuer - vk;
-    endvermögen = reihe[N - 1].portfolio + nettoVerkaufserlös;
-    letzterZahlungszuschlag = nettoVerkaufserlös;
-  } else {
-    endvermögen = reihe[N - 1].gesamtvermögen;
-    letzterZahlungszuschlag = reihe[N - 1].immobilienEK; // fiktiver Verkauf zum EK-Buchwert
+  // Amortisation: erstes Jahr mit kumuliertem Cashflow ≥ 0 (§3.8)
+  let kum = 0;
+  let amortisationJahr = null;
+  for (let t = 0; t < N; t++) {
+    kum += reihe[t].cashflowNachSteuer;
+    if (kum >= 0) { amortisationJahr = t + 1; break; }
   }
 
-  // IRR auf [-EK, cf_1, …, cf_{N-1}, cf_N + Zuschlag]
+  // Netto-Liquidationswert: gemeinsam für Verkauf UND IRR-Fallback (Vergleichbarkeit, F3)
+  const { anschaffungskosten, afaBasis } = berechneVorab(config);
+  const { afaKumuliert } = berechneAfa(config, afaBasis, N);
+  const stEff = config.grenzsteuersatz * (config.soliKirche ? 1.055 : 1);
+  const vk = config.veräußerungskosten || 0; // Makler, Vorfälligkeitsentschädigung
+  const verkaufspreis = reihe[N - 1].immobilienwert;
+  let latenteSpekusteuer = 0;
+  if (N < 10) {
+    const gewinn = verkaufspreis - (anschaffungskosten - afaKumuliert[N - 1]) - vk;
+    latenteSpekusteuer = Math.max(gewinn, 0) * stEff;
+  }
+  const terminalNetto = immobilienEK_N - vk - latenteSpekusteuer; // = verkaufspreis − restschuld − vk − steuer
+
+  // Endvermögen: bei Verkauf realisiert (netto), sonst Buchwert-Vermögen (Halten, unrealisiert).
+  const endvermögen = config.verkaufAktiv
+    ? reihe[N - 1].portfolio + terminalNetto
+    : reihe[N - 1].gesamtvermögen;
+
+  // IRR immer mit NETTO-Terminal → mit/ohne Verkauf vergleichbar (F3)
   const zahlungen = [-finanzierung.eigenkapital];
   for (let t = 1; t <= N; t++) {
     let z = reihe[t - 1].cashflowNachSteuer;
-    if (t === N) z += letzterZahlungszuschlag;
+    if (t === N) z += terminalNetto;
     zahlungen.push(z);
   }
 
-  return { cashflowM1, breakEvenJahr, restschuldN, endvermögen, irr: irr(zahlungen) };
+  return { cashflowM1, breakEvenJahr, amortisationJahr, restschuldN, immobilienEK_N, endvermögen, terminalNetto, irr: irr(zahlungen) };
+}
+
+// Kritische Alternativrendite: altRendite, bei der Endvermögen A == B (F2). null = kein Umschlag in [0,20%].
+export function kritischeAltRendite(config, finA, finB) {
+  const diff = (alt) => {
+    const c = { ...config, altRendite: alt };
+    const eA = berechneKennzahlen(berechneSzenario(c, finA), c, finA).endvermögen;
+    const eB = berechneKennzahlen(berechneSzenario(c, finB), c, finB).endvermögen;
+    return eA - eB;
+  };
+  let lo = 0, hi = 0.20;
+  const dLo = diff(lo);
+  if (dLo === 0) return lo;
+  if (dLo * diff(hi) > 0) return null; // kein Vorzeichenwechsel → ein Szenario dominiert durchgängig
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    const d = diff(mid);
+    if (Math.abs(d) < 1) return mid;
+    if (diff(lo) * d < 0) hi = mid; else lo = mid;
+  }
+  return (lo + hi) / 2;
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test`
-Expected: PASS (14 tests total).
+Expected: PASS (17 tests total).
 
 - [ ] **Step 5: Commit**
 
@@ -564,7 +626,7 @@ git commit -m "feat: irr + berechneKennzahlen (Verkauf, Spekulationssteuer, EK-R
 - Consumes: `config`, `berechneVorab`, `berechneSzenario`, `berechneKennzahlen`.
 - Produces:
   - `stufenZins(ltv, stufen) → number` — `stufen` is `[{ maxLTV, zins }]` sorted ascending by `maxLTV`; returns the `zins` of the first stufe with `ltv ≤ maxLTV`, else the last stufe's `zins`.
-  - `berechneEKKurve(config, ekParams) → { ek, endvermögen, irr }[]`. `ekParams = { anfTilgung, zinsbindung, anschlusszins, stufen, ekMin, ekMax, schritt }`.
+  - `berechneEKKurve(config, ekParams) → { ek, endvermögen, irr }[]`. `ekParams = { anfTilgung, zinsbindung, anschlusszins, beleihungswertAbschlag, stufen, ekMin, ekMax, schritt }`. LTV base = `kaufpreis × (1 − beleihungswertAbschlag)` (default 0).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -616,10 +678,11 @@ export function stufenZins(ltv, stufen) {
 
 export function berechneEKKurve(config, ekParams) {
   const { anschaffungskosten } = berechneVorab(config);
+  const beleihungswert = config.kaufpreis * (1 - (ekParams.beleihungswertAbschlag || 0));
   const punkte = [];
   for (let ek = ekParams.ekMin; ek <= ekParams.ekMax + 1e-6; ek += ekParams.schritt) {
     const darlehen = Math.max(0, anschaffungskosten - ek);
-    const ltv = config.kaufpreis > 0 ? darlehen / config.kaufpreis : 0;
+    const ltv = beleihungswert > 0 ? darlehen / beleihungswert : 0; // Basis Beleihungswert (F6)
     const sollzins = stufenZins(ltv, ekParams.stufen);
     const finanzierung = {
       eigenkapital: ek,
@@ -641,7 +704,7 @@ export function berechneEKKurve(config, ekParams) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test`
-Expected: PASS (16 tests total).
+Expected: PASS (19 tests total).
 
 - [ ] **Step 5: Commit**
 
@@ -702,7 +765,7 @@ export function formatPct(n, decimals = 1) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test`
-Expected: PASS (18 tests total). Note: `Intl` de-DE uses a non-breaking space before `€`/`%`; if an assertion fails on the space character, copy the actual output into the expected string.
+Expected: PASS (21 tests total). Note: `Intl` de-DE uses a non-breaking space before `€`/`%`; if an assertion fails on the space character, copy the actual output into the expected string.
 
 - [ ] **Step 5: Commit**
 
@@ -823,7 +886,7 @@ Expected: page loads Chart.js; if the CDN file is tampered, the browser refuses 
 - [ ] **Step 2: Create `app.js` — field definitions, config readers, A/B render**
 
 ```js
-import { berechneSzenario, berechneKennzahlen, berechneEKKurve, berechneVorab } from './calc.js';
+import { berechneSzenario, berechneKennzahlen, berechneEKKurve, berechneVorab, kritischeAltRendite } from './calc.js';
 import { formatEUR, formatPct } from './format.js';
 
 // Feld-Definitionen: [id, label, default, {pct?, int?}]
@@ -852,6 +915,7 @@ const felder = {
     ['jahre', 'Betrachtungszeitraum (Jahre)', 20, { int: true }],
     ['wertsteigerung', 'Wertsteigerung p.a. (%)', 2.0, { pct: true }],
     ['altRendite', 'Alternativrendite netto (%)', 5.0, { pct: true }],
+    ['sollzinsUnterdeckung', 'Sollzins bei Unterdeckung (%)', 9.0, { pct: true }],
     ['verfügbaresKapital', 'Verfügbares Kapital (€)', 100000, {}],
     ['veräußerungskosten', 'Veräußerungskosten bei Verkauf (€)', 0, {}],
   ],
@@ -901,6 +965,7 @@ export function leseConfig() {
     ruecklageZufuehrung: num('ruecklageZufuehrung'), kostensteigerung: pct('kostensteigerung'),
     grenzsteuersatz: pct('grenzsteuersatz'), soliKirche: document.getElementById('soliKirche').value === '1',
     jahre: Math.round(num('jahre')), wertsteigerung: pct('wertsteigerung'), altRendite: pct('altRendite'),
+    sollzinsUnterdeckung: pct('sollzinsUnterdeckung'),
     verfügbaresKapital: num('verfügbaresKapital'), verkaufAktiv: document.getElementById('verkaufAktiv').value === '1',
     veräußerungskosten: num('veräußerungskosten'),
   };
@@ -929,16 +994,19 @@ export function renderAB() {
   const kA = berechneKennzahlen(rA, config, leseFinanzierung('A'));
   const kB = berechneKennzahlen(rB, config, leseFinanzierung('B'));
 
+  const kr = kritischeAltRendite(config, leseFinanzierung('A'), leseFinanzierung('B'));
   document.getElementById('kpis').innerHTML = [
     ['Cashflow/Monat J1 A', formatEUR(kA.cashflowM1)], ['Cashflow/Monat J1 B', formatEUR(kB.cashflowM1)],
-    ['Endvermögen A', formatEUR(kA.endvermögen)], ['Endvermögen B', formatEUR(kB.endvermögen)],
-    ['EK-Rendite A', formatPct(kA.irr)], ['EK-Rendite B', formatPct(kB.irr)],
+    ['Endvermögen A ★', formatEUR(kA.endvermögen)], ['Endvermögen B ★', formatEUR(kB.endvermögen)],
+    ['EK-Rendite A (ergänzend)', formatPct(kA.irr)], ['EK-Rendite B (ergänzend)', formatPct(kB.irr)],
+    ['Kritische Alternativrendite (A↔B)', kr === null ? '—' : formatPct(kr)],
   ].map(([t, v]) => `<div class="kpi">${t}<b>${v}</b></div>`).join('');
 
   const diff = kB.endvermögen - kA.endvermögen;
   const sieger = diff >= 0 ? 'B' : 'A';
+  const krText = kr === null ? '' : ` Umschlagpunkt bei ${formatPct(kr)} Alternativrendite.`;
   document.getElementById('fazit').textContent =
-    `Szenario ${sieger} baut nach ${config.jahre} Jahren ${formatEUR(Math.abs(diff))} mehr Vermögen auf.`;
+    `Szenario ${sieger} baut nach ${config.jahre} Jahren ${formatEUR(Math.abs(diff))} mehr Vermögen auf (Primärmetrik Endvermögen).${krText}`;
 
   const labels = rA.map((z) => 'J' + z.jahr);
   zeichneChart(labels, [
@@ -1008,6 +1076,7 @@ function baueEKFelder() {
     ['ek_anfTilgung', 'Anf. Tilgung p.a. (%)', 2.0],
     ['ek_zinsbindung', 'Zinsbindung (Jahre)', 10],
     ['ek_anschlusszins', 'Anschlusszins p.a. (%)', 4.0],
+    ['ek_beleihungswertAbschlag', 'Beleihungswert-Abschlag (%)', 10],
   ].map(([id, l, d]) => `<label>${l}<input id="${id}" type="number" step="any" value="${d}" /></label>`).join('');
 
   document.querySelector('#stufenTabelle tbody').innerHTML = stufenDefault
@@ -1027,6 +1096,7 @@ function leseEKParams(config) {
     anfTilgung: num('ek_anfTilgung') / 100,
     zinsbindung: Math.round(num('ek_zinsbindung')),
     anschlusszins: num('ek_anschlusszins') / 100,
+    beleihungswertAbschlag: num('ek_beleihungswertAbschlag') / 100,
     stufen: leseStufen(),
     ekMin: 0,
     ekMax: config.verfügbaresKapital,
@@ -1057,7 +1127,8 @@ function renderEK() {
   // Karte am Reglerpunkt
   const { anschaffungskosten } = berechneVorab(config);
   const darlehen = Math.max(0, anschaffungskosten - ekAktuell);
-  const ltv = config.kaufpreis > 0 ? darlehen / config.kaufpreis : 0;
+  const beleihungswert = config.kaufpreis * (1 - params.beleihungswertAbschlag); // F6
+  const ltv = beleihungswert > 0 ? darlehen / beleihungswert : 0;
   const zins = leseStufen().reduce((acc, s) => (acc !== null ? acc : (ltv <= s.maxLTV ? s.zins : null)), null) ?? params.stufen.at(-1).zins;
   const fin = { eigenkapital: ekAktuell, sollzins: zins, anfTilgung: params.anfTilgung, zinsbindung: params.zinsbindung, anschlusszins: params.anschlusszins, sondertilgung: 0, finanzierungskosten: 0 };
   const kPunkt = berechneKennzahlen(berechneSzenario(config, fin), config, fin);
@@ -1170,7 +1241,7 @@ Planungswerkzeug. Werte sind Prognosen. Spec: `specs/spec-immobilien-cashflow-re
 - [ ] **Step 2: Run the full test suite once more**
 
 Run: `node --test`
-Expected: PASS (18 tests).
+Expected: PASS (21 tests).
 
 - [ ] **Step 3: Commit and push**
 
@@ -1206,6 +1277,7 @@ Expected: `HTTP/2 200`. Open the URL, confirm both modes work.
 - §5 tech (single index.html, Chart.js CDN, pure `berechneSzenario`) → Tasks 1–9. ✓
 - §6 acceptance numbers → asserted in Tasks 1, 3, 4, 5. ✓
 - §7a EK-Regler mode → Tasks 6 + 9. ✓
+- Finanz-Review v1.3: Unterdeckungszins (F1) → Task 4; kritische Alternativrendite (F2) → Task 5 + 8; Netto-Terminal/IRR-Vergleichbarkeit (F3) → Task 5; Re-Annuisierung (F4) → Task 3; Endvermögen-Primärmetrik + IRR-Caveat (F5) → Tasks 5/8; Beleihungswert-LTV (F6) → Tasks 6/9; Break-even vs. Amortisation (F7) → Task 5. ✓
 
 **Known simplifications (from spec §7, intentional):**
 - Degressive AfA uses a pauschal 33-year remaining-life switch (Task 2 ponytail note) — approximation, adequate for the tax-timing comparison.
