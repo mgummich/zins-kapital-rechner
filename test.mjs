@@ -201,3 +201,15 @@ test('berechneEKKurve: Stützpunkte über EK-Bereich', () => {
 });
 
 export { basisConfig, finA, finB };
+
+import { formatEUR, formatPct } from './format.js';
+
+test('formatEUR: de-DE ohne Nachkommastellen', () => {
+  assert.equal(formatEUR(333210), "333.210 €");
+  assert.equal(formatEUR(-4321), "-4.321 €");
+});
+
+test('formatPct: Dezimal → Prozent', () => {
+  assert.equal(formatPct(0.035), "3,5 %");
+  assert.equal(formatPct(0.42), "42,0 %");
+});
