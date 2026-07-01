@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Immobilien-Cashflow-Rechner</title>
+  <style>
+    :root { --gap: 12px; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; max-width: 1100px; margin-inline: auto; color: #1a1a1a; }
+    h1 { font-size: 1.4rem; }
+    fieldset { border: 1px solid #ccc; border-radius: 8px; margin-bottom: var(--gap); }
+    legend { font-weight: 600; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--gap); }
+    label { display: flex; flex-direction: column; font-size: 0.85rem; gap: 2px; }
+    input, select { padding: 6px; font-size: 0.9rem; }
+    .szenarien { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--gap); }
+    .kpi { border: 1px solid #ddd; border-radius: 8px; padding: 10px; }
+    .kpi b { display: block; font-size: 1.15rem; }
+    .modus { display: flex; gap: 8px; margin-bottom: var(--gap); }
+    .modus button { padding: 8px 14px; cursor: pointer; }
+    .modus button[aria-pressed="true"] { background: #1a1a1a; color: #fff; }
+    #fazit { padding: 12px; border-radius: 8px; background: #eef6ff; margin: var(--gap) 0; }
+    .disclaimer { font-size: 0.75rem; color: #666; border-top: 1px solid #ddd; margin-top: 24px; padding-top: 12px; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
+    th, td { border: 1px solid #ddd; padding: 4px 6px; text-align: right; }
+    @media (max-width: 700px) { .szenarien { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>Immobilien-Cashflow-Rechner</h1>
+  <div class="modus">
+    <button id="modeAB" aria-pressed="true">A vs. B</button>
+    <button id="modeEK" aria-pressed="false">EK-Optimum</button>
+  </div>
+
+  <form id="form">
+    <fieldset><legend>Objekt &amp; Kauf</legend><div class="grid" id="grpObjekt"></div></fieldset>
+    <fieldset><legend>AfA</legend><div class="grid" id="grpAfa"></div></fieldset>
+    <fieldset><legend>Miete</legend><div class="grid" id="grpMiete"></div></fieldset>
+    <fieldset><legend>Kosten</legend><div class="grid" id="grpKosten"></div></fieldset>
+    <fieldset><legend>Steuer</legend><div class="grid" id="grpSteuer"></div></fieldset>
+    <fieldset><legend>Annahmen &amp; Zeitraum</legend><div class="grid" id="grpAnnahmen"></div></fieldset>
+
+    <fieldset id="fsAB"><legend>Finanzierung</legend>
+      <div class="szenarien">
+        <div><h3>Szenario A</h3><div class="grid" id="grpFinA"></div></div>
+        <div><h3>Szenario B</h3><div class="grid" id="grpFinB"></div></div>
+      </div>
+    </fieldset>
+
+    <fieldset id="fsEK" hidden><legend>Finanzierung (EK-Optimum)</legend>
+      <div class="grid" id="grpEK"></div>
+      <h4>LTV → Zins-Stufen</h4>
+      <table id="stufenTabelle"><thead><tr><th>LTV ≤</th><th>Zins %</th></tr></thead><tbody></tbody></table>
+      <label>Eigenkapital: <span id="ekWert"></span>
+        <input type="range" id="ekRegler" />
+      </label>
+      <div><label>Y-Achse:
+        <select id="ekMetrik"><option value="endvermögen">Endvermögen</option><option value="irr">EK-Rendite (IRR)</option></select>
+      </label></div>
+    </fieldset>
+  </form>
+
+  <div id="fazit"></div>
+  <div class="kpis" id="kpis"></div>
+  <canvas id="chart" height="120"></canvas>
+  <details><summary>Jahres-Tabelle</summary><div id="tabelle"></div></details>
+
+  <p class="disclaimer">
+    Planungswerkzeug, keine Steuer- oder Rechtsberatung. Schuldzinsen sind nur bei
+    vermieteten Objekten absetzbar. Alle Werte sind Prognosen unter den angegebenen Annahmen.
+  </p>
+
+  <!-- Chart.js gepinnt + Subresource Integrity -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"
+          integrity="sha384-Sse/HDqcypGpyTDpvZOJNnG0TT3feGQUkF9H+mnRvic+LjR+K1NhTt8f51KIQ3v3" crossorigin="anonymous"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
