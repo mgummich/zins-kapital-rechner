@@ -53,7 +53,8 @@ const basisConfig = {
   mietsteigerung: 0.015,
   leerstand: 0.02,
   verwaltung: 300,
-  instandhaltung: 1200,
+  instandhaltung: 1200,        // sofort absetzbar (Werbungskosten)
+  ruecklageZufuehrung: 0,      // WEG-Erhaltungsrücklage: Cashflow, NICHT absetzbar
   kostensteigerung: 0.015,
   grenzsteuersatz: 0.42,
   soliKirche: false,
@@ -62,6 +63,7 @@ const basisConfig = {
   altRendite: 0.05,
   verfügbaresKapital: 100000,
   verkaufAktiv: false,
+  veräußerungskosten: 0,       // bei Verkauf: Makler, Vorfälligkeitsentschädigung
 };
 
 test('berechneVorab: Kaufnebenkosten und AfA-Basis (Spec §6)', () => {
@@ -224,8 +226,8 @@ Append to `test.mjs`:
 ```js
 import { berechneDarlehen } from './calc.js';
 
-const finB = { eigenkapital: 40000, sollzins: 0.039, anfTilgung: 0.02, zinsbindung: 10, anschlusszins: 0.04, sondertilgung: 0 };
-const finA = { eigenkapital: 100000, sollzins: 0.035, anfTilgung: 0.02, zinsbindung: 10, anschlusszins: 0.04, sondertilgung: 0 };
+const finB = { eigenkapital: 40000, sollzins: 0.039, anfTilgung: 0.02, zinsbindung: 10, anschlusszins: 0.04, sondertilgung: 0, finanzierungskosten: 0 };
+const finA = { eigenkapital: 100000, sollzins: 0.035, anfTilgung: 0.02, zinsbindung: 10, anschlusszins: 0.04, sondertilgung: 0, finanzierungskosten: 0 };
 
 test('berechneDarlehen: Szenario B Jahr 1 (Spec §6)', () => {
   const d = berechneDarlehen(finB, 333210, 20);
@@ -317,7 +319,7 @@ git commit -m "feat: berechneDarlehen (monatliche Annuität, Zinsbindung, Sonder
 
 **Interfaces:**
 - Consumes: `config`, `finanzierung`; internally calls `berechneVorab`, `berechneAfa`, `berechneDarlehen`.
-- Produces: `berechneSzenario(config, finanzierung) → Zeile[]` length `config.jahre`. `Zeile = { jahr, mietNetto, bewirtschaftung, zins, tilgung, afa, steuerErgebnis, steuerEffekt, cashflowVorSteuer, cashflowNachSteuer, restschuld, immobilienwert, immobilienEK, portfolio, gesamtvermögen }`.
+- Produces: `berechneSzenario(config, finanzierung) → Zeile[]` length `config.jahre`. `Zeile = { jahr, mietNetto, bewirtschaftungAbzieh, ruecklage, zins, tilgung, afa, steuerErgebnis, steuerEffekt, cashflowVorSteuer, cashflowNachSteuer, restschuld, immobilienwert, immobilienEK, portfolio, gesamtvermögen }`. `bewirtschaftungAbzieh` = deductible (Werbungskosten); `ruecklage` = non-deductible cash outflow. `config` gains `ruecklageZufuehrung`; `finanzierung` gains `finanzierungskosten` (deducted in year 1 only).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -329,7 +331,7 @@ test('berechneSzenario: Szenario B Jahr 1 (Spec §6)', () => {
   const r = berechneSzenario(basisConfig, finB);
   const j1 = r[0];
   assert.ok(Math.abs(j1.mietNetto - 11760) < 1, `mietNetto=${j1.mietNetto}`);
-  assert.ok(Math.abs(j1.bewirtschaftung - 1500) < 1, `bewirt=${j1.bewirtschaftung}`);
+  assert.ok(Math.abs(j1.bewirtschaftungAbzieh - 1500) < 1, `bewirt=${j1.bewirtschaftungAbzieh}`);
   assert.ok(Math.abs(j1.steuerErgebnis - -6471) < 200, `steuerErgebnis=${j1.steuerErgebnis}`);
   assert.ok(Math.abs(j1.steuerEffekt - 2718) < 100, `steuerEffekt=${j1.steuerEffekt}`);
   assert.ok(Math.abs(j1.cashflowNachSteuer - -4321) < 200, `cfNachSt=${j1.cashflowNachSteuer}`);
@@ -345,6 +347,22 @@ test('berechneSzenario: Portfolio startet mit freiem Kapital', () => {
 test('berechneSzenario: mietNetto steigt mit Mietsteigerung', () => {
   const r = berechneSzenario(basisConfig, finB);
   assert.ok(r[1].mietNetto > r[0].mietNetto);
+});
+
+test('berechneSzenario: Erhaltungsrücklage senkt Cashflow, nicht die Steuer', () => {
+  const basis = berechneSzenario(basisConfig, finB)[0];
+  const mitRuecklage = berechneSzenario({ ...basisConfig, ruecklageZufuehrung: 1000 }, finB)[0];
+  assert.ok(Math.abs(mitRuecklage.steuerEffekt - basis.steuerEffekt) < 0.01, 'Rücklage nicht absetzbar → Steuer gleich');
+  assert.ok(Math.abs(mitRuecklage.cashflowNachSteuer - (basis.cashflowNachSteuer - 1000)) < 0.01, 'Rücklage mindert Cashflow voll');
+});
+
+test('berechneSzenario: Finanzierungskosten nur Jahr 1 absetzbar', () => {
+  const finMitKosten = { ...finB, finanzierungskosten: 2000 };
+  const r0 = berechneSzenario(basisConfig, finB);
+  const r1 = berechneSzenario(basisConfig, finMitKosten);
+  const stEff = 0.42;
+  assert.ok(Math.abs(r1[0].steuerEffekt - (r0[0].steuerEffekt + 2000 * stEff)) < 0.01, 'Jahr 1: +2000 Werbungskosten');
+  assert.ok(Math.abs(r1[1].steuerEffekt - r0[1].steuerEffekt) < 0.01, 'Jahr 2: kein Effekt');
 });
 ```
 
@@ -370,17 +388,21 @@ export function berechneSzenario(config, finanzierung) {
   for (let t = 1; t <= config.jahre; t++) {
     const kaltmieteJahr = config.kaltmieteMonat * 12 * Math.pow(1 + config.mietsteigerung, t - 1);
     const mietNetto = kaltmieteJahr * (1 - config.leerstand);
-    const bewirtschaftung = (config.verwaltung + config.instandhaltung) * Math.pow(1 + config.kostensteigerung, t - 1);
+    const steigerung = Math.pow(1 + config.kostensteigerung, t - 1);
+    const bewirtschaftungAbzieh = (config.verwaltung + config.instandhaltung) * steigerung; // Werbungskosten
+    const ruecklage = (config.ruecklageZufuehrung || 0) * steigerung; // nur Cashflow, nicht absetzbar
+    const finKostenAbzieh = t === 1 ? (finanzierung.finanzierungskosten || 0) : 0; // Disagio etc. Jahr 1
     const zins = darlehen.zins[t - 1];
     const tilgung = darlehen.tilgung[t - 1];
     const afa = afaJahr[t - 1];
 
-    const werbungskosten = zins + afa + bewirtschaftung;
+    const werbungskosten = zins + afa + bewirtschaftungAbzieh + finKostenAbzieh;
     const steuerErgebnis = mietNetto - werbungskosten;
     const steuerEffekt = -steuerErgebnis * stEff; // Verlust → positiv (Erstattung)
 
     const kapitaldienst = zins + tilgung;
-    const cashflowVorSteuer = mietNetto - bewirtschaftung - kapitaldienst;
+    const liquiKosten = bewirtschaftungAbzieh + ruecklage + finKostenAbzieh;
+    const cashflowVorSteuer = mietNetto - liquiKosten - kapitaldienst;
     const cashflowNachSteuer = cashflowVorSteuer + steuerEffekt;
 
     const restschuld = darlehen.restschuld[t - 1];
@@ -392,7 +414,7 @@ export function berechneSzenario(config, finanzierung) {
     const gesamtvermögen = immobilienEK + portfolio;
 
     zeilen.push({
-      jahr: t, mietNetto, bewirtschaftung, zins, tilgung, afa,
+      jahr: t, mietNetto, bewirtschaftungAbzieh, ruecklage, zins, tilgung, afa,
       steuerErgebnis, steuerEffekt, cashflowVorSteuer, cashflowNachSteuer,
       restschuld, immobilienwert, immobilienEK, portfolio, gesamtvermögen,
     });
@@ -404,7 +426,7 @@ export function berechneSzenario(config, finanzierung) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test`
-Expected: PASS (9 tests total).
+Expected: PASS (11 tests total).
 
 - [ ] **Step 5: Commit**
 
@@ -492,12 +514,13 @@ export function berechneKennzahlen(reihe, config, finanzierung) {
     const { afaKumuliert } = berechneAfa(config, berechneVorab(config).afaBasis, N);
     const stEff = config.grenzsteuersatz * (config.soliKirche ? 1.055 : 1);
     const verkaufspreis = reihe[N - 1].immobilienwert;
+    const vk = config.veräußerungskosten || 0; // Makler, Vorfälligkeitsentschädigung
     let spekusteuer = 0;
     if (N < 10) {
-      const gewinn = verkaufspreis - (anschaffungskosten - afaKumuliert[N - 1]);
+      const gewinn = verkaufspreis - (anschaffungskosten - afaKumuliert[N - 1]) - vk;
       spekusteuer = Math.max(gewinn, 0) * stEff;
     }
-    const nettoVerkaufserlös = verkaufspreis - restschuldN - spekusteuer;
+    const nettoVerkaufserlös = verkaufspreis - restschuldN - spekusteuer - vk;
     endvermögen = reihe[N - 1].portfolio + nettoVerkaufserlös;
     letzterZahlungszuschlag = nettoVerkaufserlös;
   } else {
@@ -520,7 +543,7 @@ export function berechneKennzahlen(reihe, config, finanzierung) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test`
-Expected: PASS (12 tests total).
+Expected: PASS (14 tests total).
 
 - [ ] **Step 5: Commit**
 
@@ -605,6 +628,7 @@ export function berechneEKKurve(config, ekParams) {
       zinsbindung: ekParams.zinsbindung,
       anschlusszins: ekParams.anschlusszins,
       sondertilgung: 0,
+      finanzierungskosten: 0,
     };
     const reihe = berechneSzenario(config, finanzierung);
     const k = berechneKennzahlen(reihe, config, finanzierung);
@@ -617,7 +641,7 @@ export function berechneEKKurve(config, ekParams) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test`
-Expected: PASS (14 tests total).
+Expected: PASS (16 tests total).
 
 - [ ] **Step 5: Commit**
 
@@ -678,7 +702,7 @@ export function formatPct(n, decimals = 1) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test`
-Expected: PASS (16 tests total). Note: `Intl` de-DE uses a non-breaking space before `€`/`%`; if an assertion fails on the space character, copy the actual output into the expected string.
+Expected: PASS (18 tests total). Note: `Intl` de-DE uses a non-breaking space before `€`/`%`; if an assertion fails on the space character, copy the actual output into the expected string.
 
 - [ ] **Step 5: Commit**
 
@@ -806,7 +830,7 @@ import { formatEUR, formatPct } from './format.js';
 const felder = {
   grpObjekt: [
     ['kaufpreis', 'Kaufpreis (€)', 300000, {}],
-    ['grundstücksanteil', 'Grundstücksanteil (%)', 20, { pct: true }],
+    ['grundstücksanteil', 'Grundstücksanteil (%)', 25, { pct: true }],
     ['grEStSatz', 'Grunderwerbsteuer (%)', 6.0, { pct: true }],
     ['notarSatz', 'Notar & Grundbuch (%)', 1.5, { pct: true }],
     ['maklerSatz', 'Maklerprovision (%)', 3.57, { pct: true }],
@@ -819,7 +843,8 @@ const felder = {
   ],
   grpKosten: [
     ['verwaltung', 'Verwaltung p.a. (€)', 300, {}],
-    ['instandhaltung', 'Instandhaltung p.a. (€)', 1200, {}],
+    ['instandhaltung', 'Instandhaltung sofort absetzbar p.a. (€)', 1200, {}],
+    ['ruecklageZufuehrung', 'Zuführung Erhaltungsrücklage p.a. (€, nicht absetzbar)', 0, {}],
     ['kostensteigerung', 'Kostensteigerung p.a. (%)', 1.5, { pct: true }],
   ],
   grpSteuer: [['grenzsteuersatz', 'Grenzsteuersatz (%)', 42, { pct: true }]],
@@ -828,6 +853,7 @@ const felder = {
     ['wertsteigerung', 'Wertsteigerung p.a. (%)', 2.0, { pct: true }],
     ['altRendite', 'Alternativrendite netto (%)', 5.0, { pct: true }],
     ['verfügbaresKapital', 'Verfügbares Kapital (€)', 100000, {}],
+    ['veräußerungskosten', 'Veräußerungskosten bei Verkauf (€)', 0, {}],
   ],
 };
 const finFelder = [
@@ -836,8 +862,9 @@ const finFelder = [
   ['anfTilgung', 'Anf. Tilgung p.a. (%)', { pct: true }],
   ['zinsbindung', 'Zinsbindung (Jahre)', { int: true }],
   ['anschlusszins', 'Anschlusszins p.a. (%)', { pct: true }],
+  ['finanzierungskosten', 'Finanzierungskosten einmalig (€)', {}],
 ];
-const finDefaults = { A: [100000, 3.5, 2.0, 10, 4.0], B: [40000, 3.9, 2.0, 10, 4.0] };
+const finDefaults = { A: [100000, 3.5, 2.0, 10, 4.0, 0], B: [40000, 3.9, 2.0, 10, 4.0, 0] };
 
 function feldHtml(id, label, def, opt) {
   return `<label>${label}<input id="${id}" type="number" step="any" value="${def}" /></label>`;
@@ -870,10 +897,12 @@ export function leseConfig() {
     grEStSatz: pct('grEStSatz'), notarSatz: pct('notarSatz'), maklerSatz: pct('maklerSatz'),
     afaMethode: document.getElementById('afaMethode').value, afaSatz: pct('afaSatz'),
     kaltmieteMonat: num('kaltmieteMonat'), mietsteigerung: pct('mietsteigerung'), leerstand: pct('leerstand'),
-    verwaltung: num('verwaltung'), instandhaltung: num('instandhaltung'), kostensteigerung: pct('kostensteigerung'),
+    verwaltung: num('verwaltung'), instandhaltung: num('instandhaltung'),
+    ruecklageZufuehrung: num('ruecklageZufuehrung'), kostensteigerung: pct('kostensteigerung'),
     grenzsteuersatz: pct('grenzsteuersatz'), soliKirche: document.getElementById('soliKirche').value === '1',
     jahre: Math.round(num('jahre')), wertsteigerung: pct('wertsteigerung'), altRendite: pct('altRendite'),
     verfügbaresKapital: num('verfügbaresKapital'), verkaufAktiv: document.getElementById('verkaufAktiv').value === '1',
+    veräußerungskosten: num('veräußerungskosten'),
   };
 }
 
@@ -882,6 +911,7 @@ export function leseFinanzierung(suffix) {
     eigenkapital: num('eigenkapital_' + suffix), sollzins: pct('sollzins_' + suffix),
     anfTilgung: pct('anfTilgung_' + suffix), zinsbindung: Math.round(num('zinsbindung_' + suffix)),
     anschlusszins: pct('anschlusszins_' + suffix), sondertilgung: 0,
+    finanzierungskosten: num('finanzierungskosten_' + suffix),
   };
 }
 
@@ -1029,7 +1059,7 @@ function renderEK() {
   const darlehen = Math.max(0, anschaffungskosten - ekAktuell);
   const ltv = config.kaufpreis > 0 ? darlehen / config.kaufpreis : 0;
   const zins = leseStufen().reduce((acc, s) => (acc !== null ? acc : (ltv <= s.maxLTV ? s.zins : null)), null) ?? params.stufen.at(-1).zins;
-  const fin = { eigenkapital: ekAktuell, sollzins: zins, anfTilgung: params.anfTilgung, zinsbindung: params.zinsbindung, anschlusszins: params.anschlusszins, sondertilgung: 0 };
+  const fin = { eigenkapital: ekAktuell, sollzins: zins, anfTilgung: params.anfTilgung, zinsbindung: params.zinsbindung, anschlusszins: params.anschlusszins, sondertilgung: 0, finanzierungskosten: 0 };
   const kPunkt = berechneKennzahlen(berechneSzenario(config, fin), config, fin);
 
   document.getElementById('kpis').innerHTML = [
@@ -1140,7 +1170,7 @@ Planungswerkzeug. Werte sind Prognosen. Spec: `specs/spec-immobilien-cashflow-re
 - [ ] **Step 2: Run the full test suite once more**
 
 Run: `node --test`
-Expected: PASS (16 tests).
+Expected: PASS (18 tests).
 
 - [ ] **Step 3: Commit and push**
 
