@@ -210,3 +210,34 @@ export function kritischeAltRendite(config, finA, finB) {
   }
   return (lo + hi) / 2;
 }
+
+export function stufenZins(ltv, stufen) {
+  for (const stufe of stufen) {
+    if (ltv <= stufe.maxLTV) return stufe.zins;
+  }
+  return stufen[stufen.length - 1].zins;
+}
+
+export function berechneEKKurve(config, ekParams) {
+  const { anschaffungskosten } = berechneVorab(config);
+  const beleihungswert = config.kaufpreis * (1 - (ekParams.beleihungswertAbschlag || 0));
+  const punkte = [];
+  for (let ek = ekParams.ekMin; ek <= ekParams.ekMax + 1e-6; ek += ekParams.schritt) {
+    const darlehen = Math.max(0, anschaffungskosten - ek);
+    const ltv = beleihungswert > 0 ? darlehen / beleihungswert : 0; // Basis Beleihungswert (F6)
+    const sollzins = stufenZins(ltv, ekParams.stufen);
+    const finanzierung = {
+      eigenkapital: ek,
+      sollzins,
+      anfTilgung: ekParams.anfTilgung,
+      zinsbindung: ekParams.zinsbindung,
+      anschlusszins: ekParams.anschlusszins,
+      sondertilgung: 0,
+      finanzierungskosten: 0,
+    };
+    const reihe = berechneSzenario(config, finanzierung);
+    const k = berechneKennzahlen(reihe, config, finanzierung);
+    punkte.push({ ek, endvermögen: k.endvermögen, irr: k.irr });
+  }
+  return punkte;
+}

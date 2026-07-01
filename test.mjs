@@ -173,4 +173,31 @@ test('kritischeAltRendite: Umschlagpunkt A↔B liegt im Intervall oder null', ()
   }
 });
 
+import { stufenZins, berechneEKKurve } from './calc.js';
+
+const stufen = [
+  { maxLTV: 0.60, zins: 0.034 },
+  { maxLTV: 0.80, zins: 0.036 },
+  { maxLTV: 0.90, zins: 0.039 },
+  { maxLTV: Infinity, zins: 0.043 },
+];
+
+test('stufenZins: Stufengrenzen', () => {
+  assert.equal(stufenZins(0.50, stufen), 0.034);
+  assert.equal(stufenZins(0.60, stufen), 0.034);
+  assert.equal(stufenZins(0.61, stufen), 0.036);
+  assert.equal(stufenZins(0.95, stufen), 0.043);
+  assert.equal(stufenZins(1.20, stufen), 0.043); // > 100% → höchste Stufe
+});
+
+test('berechneEKKurve: Stützpunkte über EK-Bereich', () => {
+  const params = { anfTilgung: 0.02, zinsbindung: 10, anschlusszins: 0.04, stufen, ekMin: 0, ekMax: 100000, schritt: 25000 };
+  const kurve = berechneEKKurve(basisConfig, params);
+  assert.equal(kurve.length, 5); // 0,25k,50k,75k,100k
+  assert.equal(kurve[0].ek, 0);
+  assert.equal(kurve[4].ek, 100000);
+  assert.ok(kurve.every((p) => typeof p.endvermögen === 'number' && isFinite(p.endvermögen)));
+  assert.ok(kurve.every((p) => typeof p.irr === 'number'));
+});
+
 export { basisConfig, finA, finB };
