@@ -44,3 +44,40 @@ export function berechneAfa(config, afaBasis, jahre) {
   }
   return { afaJahr, afaKumuliert };
 }
+
+export function berechneDarlehen(finanzierung, anschaffungskosten, jahre) {
+  const darlehen = Math.max(0, anschaffungskosten - finanzierung.eigenkapital);
+  const zins = [];
+  const tilgung = [];
+  const restschuld = [];
+
+  // Annuität aus Anfangsdarlehen; beim Anschluss einmal neu annuisiert (verhindert neg. Amortisation).
+  let monatsrate = (darlehen * (finanzierung.sollzins + finanzierung.anfTilgung)) / 12;
+  let rest = darlehen;
+
+  for (let t = 1; t <= jahre; t++) {
+    const aktuellerZins = t <= finanzierung.zinsbindung ? finanzierung.sollzins : finanzierung.anschlusszins;
+    if (t === finanzierung.zinsbindung + 1) {
+      monatsrate = (rest * (finanzierung.anschlusszins + finanzierung.anfTilgung)) / 12; // Re-Annuisierung
+    }
+    let zinsJahr = 0;
+    let tilgungJahr = 0;
+    for (let m = 0; m < 12 && rest > 0; m++) {
+      const zinsMonat = rest * (aktuellerZins / 12);
+      let tilgungMonat = monatsrate - zinsMonat;
+      if (tilgungMonat > rest) tilgungMonat = rest; // letzte Rate
+      rest -= tilgungMonat;
+      zinsJahr += zinsMonat;
+      tilgungJahr += tilgungMonat;
+    }
+    if (finanzierung.sondertilgung > 0 && rest > 0) {
+      const sonder = Math.min(finanzierung.sondertilgung, rest);
+      rest -= sonder;
+      tilgungJahr += sonder;
+    }
+    zins.push(zinsJahr);
+    tilgung.push(tilgungJahr);
+    restschuld.push(rest);
+  }
+  return { zins, tilgung, restschuld };
+}

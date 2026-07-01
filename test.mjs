@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { berechneVorab, berechneAfa } from './calc.js';
+import { berechneVorab, berechneAfa, berechneDarlehen } from './calc.js';
 
 const basisConfig = {
   kaufpreis: 300000,
@@ -55,4 +55,37 @@ test('berechneAfa: degressiv 5% fällt und wechselt zu linear', () => {
   assert.ok(spät.every((x) => x >= 0));
 });
 
-export { basisConfig };
+const finB = { eigenkapital: 40000, sollzins: 0.039, anfTilgung: 0.02, zinsbindung: 10, anschlusszins: 0.04, sondertilgung: 0, finanzierungskosten: 0 };
+const finA = { eigenkapital: 100000, sollzins: 0.035, anfTilgung: 0.02, zinsbindung: 10, anschlusszins: 0.04, sondertilgung: 0, finanzierungskosten: 0 };
+
+test('berechneDarlehen: Szenario B Jahr 1 (Spec §6)', () => {
+  const d = berechneDarlehen(finB, 333210, 20);
+  // Darlehen = 333210 - 40000 = 293210
+  assert.ok(Math.abs(d.zins[0] - 11400) < 150, `zins1=${d.zins[0]}`);
+  assert.ok(Math.abs(d.tilgung[0] - 5900) < 150, `tilgung1=${d.tilgung[0]}`);
+  assert.ok(d.restschuld[0] < 293210, 'Restschuld sinkt');
+  assert.ok(d.restschuld[19] < d.restschuld[0], 'Restschuld monoton fallend');
+});
+
+test('berechneDarlehen: Szenario A Jahr 1 (Spec §6)', () => {
+  const d = berechneDarlehen(finA, 333210, 20);
+  // Darlehen = 233210
+  assert.ok(Math.abs(d.zins[0] - 8100) < 150, `zins1=${d.zins[0]}`);
+  assert.ok(Math.abs(d.tilgung[0] - 4700) < 150, `tilgung1=${d.tilgung[0]}`);
+});
+
+test('berechneDarlehen: EK > Anschaffungskosten → Darlehen 0', () => {
+  const d = berechneDarlehen({ ...finA, eigenkapital: 400000 }, 333210, 5);
+  assert.equal(d.zins[0], 0);
+  assert.equal(d.restschuld[0], 0);
+});
+
+test('berechneDarlehen: hoher Anschlusszins → keine negative Amortisation (Re-Annuisierung)', () => {
+  const d = berechneDarlehen({ ...finB, zinsbindung: 5, anschlusszins: 0.12 }, 333210, 15);
+  // trotz 12% Anschlusszins muss die Restschuld weiter fallen, nie wachsen
+  for (let i = 1; i < d.restschuld.length; i++) {
+    assert.ok(d.restschuld[i] <= d.restschuld[i - 1] + 1e-6, `Jahr ${i + 1}: Restschuld steigt`);
+  }
+});
+
+export { basisConfig, finA, finB };
