@@ -173,10 +173,10 @@ export function berechneKennzahlen(reihe, config, finanzierung) {
   }
   const terminalNetto = immobilienEK_N - vk - latenteSpekusteuer; // = verkaufspreis − restschuld − vk − steuer
 
-  // Endvermögen: bei Verkauf realisiert (nur Netto-Liquidationswert ohne Portfolio),
+  // Endvermögen: bei Verkauf realisiert (Netto-Liquidationswert + Portfolio),
   // sonst Gesamtvermögen (unrealisiert mit Immobilie und Portfolio)
   const endvermögen = config.verkaufAktiv
-    ? terminalNetto
+    ? reihe[N - 1].portfolio + terminalNetto
     : reihe[N - 1].gesamtvermögen;
 
   // IRR immer mit NETTO-Terminal → mit/ohne Verkauf vergleichbar (F3)

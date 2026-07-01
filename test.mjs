@@ -143,10 +143,12 @@ test('berechneKennzahlen: Szenario B Kennzahlen', () => {
 });
 
 test('berechneKennzahlen: Verkauf aktiv verändert Endvermögen', () => {
-  const r = berechneSzenario({ ...basisConfig, verkaufAktiv: true }, finB);
-  const kMitVerkauf = berechneKennzahlen(r, { ...basisConfig, verkaufAktiv: true }, finB);
-  const kOhne = berechneKennzahlen(berechneSzenario(basisConfig, finB), basisConfig, finB);
+  const cfg = { ...basisConfig, verkaufAktiv: true, veräußerungskosten: 5000 };
+  const r = berechneSzenario(cfg, finB);
+  const kMitVerkauf = berechneKennzahlen(r, cfg, finB);
+  const kOhne = berechneKennzahlen(berechneSzenario({ ...basisConfig, veräußerungskosten: 5000 }, finB), { ...basisConfig, veräußerungskosten: 5000 }, finB);
   assert.notEqual(Math.round(kMitVerkauf.endvermögen), Math.round(kOhne.endvermögen));
+  assert.ok(Math.abs(kMitVerkauf.endvermögen - (r[r.length - 1].portfolio + kMitVerkauf.terminalNetto)) < 0.01, 'Endvermögen bei Verkauf = Portfolio + terminalNetto');
 });
 
 test('berechneKennzahlen: terminalNetto ≤ Buchwert-EK bei N<10 (Kosten/Steuer abgezogen)', () => {
