@@ -1,6 +1,6 @@
 # Spec: Immobilien-Cashflow-Vergleichsrechner (Kapitalanlage)
 
-**Version:** 1.1
+**Version:** 1.2
 **Zweck:** Ein interaktiver Rechner, der für dieselbe vermietete Immobilie zwei Finanzierungsvarianten gegenüberstellt (z. B. „mehr Eigenkapital, niedriger Zins" vs. „weniger Eigenkapital, höherer Zins") und über einen frei wählbaren Zeitraum den vollständigen Cashflow nach Steuern, die Vermögensentwicklung und die Eigenkapitalrendite berechnet. Kernfrage: **Lohnt sich höheres Eigenkapital, oder ist ein etwas höherer Zins wegen Steuervorteil + freiem Kapital am Ende besser?**
 
 **Zielgruppe der Ausgabe:** Privatanleger:innen in Deutschland mit vermieteter Kapitalanlage-Immobilie.
@@ -33,7 +33,7 @@ Ausgabe: KPI-Karten, ein Verlaufs-Chart (kumuliertes Vermögen beider Szenarien)
 | Feld | Typ | Default | Hinweis |
 |---|---|---|---|
 | Kaufpreis | € | 300.000 | reiner Kaufpreis der Immobilie |
-| Grundstücksanteil | % | 20 | nicht abschreibbar; Rest = Gebäudeanteil |
+| Grundstücksanteil | % | 25 | nicht abschreibbar; Rest = Gebäudeanteil. **Regionsabhängig:** ländlich ~15–25 %, Städte 30–45 %. Maßgeblich ist die reale Kaufpreisaufteilung (notariell/BMF-Arbeitshilfe „Kaufpreisaufteilung", oft mit FA strittig). Zu niedriger Wert → überhöhte AfA-Basis → überschätzter Steuervorteil |
 | Grunderwerbsteuer | % | 6,0 | je Bundesland 3,5–6,5 % |
 | Notar & Grundbuch | % | 1,5 | vom Kaufpreis |
 | Maklerprovision | % | 3,57 | Käuferanteil, 0 wenn ohne Makler |
@@ -66,16 +66,17 @@ AfA-Methoden-Optionen (als Dropdown):
 
 | Feld | Typ | Default | Hinweis |
 |---|---|---|---|
-| Nicht umlagefähige Verwaltung p.a. | € | 300 | z. B. WEG-Verwaltervergütung |
-| Instandhaltungsrücklage p.a. | € | 1.200 | Faustregel ~1 €/m²/Monat |
-| Kostensteigerung p.a. | % | 1,5 | optional, wächst mit den Jahren |
+| Nicht umlagefähige Verwaltung p.a. | € | 300 | z. B. WEG-Verwaltervergütung; sofort abziehbare Werbungskosten |
+| Instandhaltung / Erhaltungsaufwand p.a. (sofort absetzbar) | € | 1.200 | tatsächliche Reparaturen / laufende Instandhaltung → sofort abziehbare Werbungskosten. **Achtung anschaffungsnahe Herstellungskosten (§ 6 Abs. 1 Nr. 1a EStG):** übersteigen Instandsetzungen in den ersten 3 Jahren nach Kauf 15 % der Gebäude-Anschaffungskosten (netto), sind sie zu aktivieren und nur über AfA absetzbar — dann nicht hier eintragen |
+| Zuführung Erhaltungsrücklage p.a. | € | 0 | Einzahlung in die WEG-Erhaltungsrücklage: liquiditätswirksamer Abfluss, aber **erst bei tatsächlicher Verausgabung durch die WEG als Werbungskosten absetzbar** (BFH IX R 19/21; Rücklage ist seit WEG-Reform 2020 Vermögen der GdWE) → hier **nicht** als Werbungskosten, nur im Cashflow |
+| Kostensteigerung p.a. | % | 1,5 | optional, wächst mit den Jahren; gilt für Verwaltung, Instandhaltung und Rücklage |
 
 ### 2.5 Steuer (gemeinsam)
 
 | Feld | Typ | Default | Hinweis |
 |---|---|---|---|
 | Persönlicher Grenzsteuersatz | % | 42 | Spitzensteuersatz einsetzbar |
-| Soli & Kirchensteuer berücksichtigen | Ja/Nein | Nein | optional Aufschlag ~1,1× |
+| Soli & Kirchensteuer berücksichtigen | Ja/Nein | Nein | grober Aufschlag ×1,055. **Soli seit 2021 für ~90 % abgeschafft** (greift erst nahe Spitzensteuersatz); Kirchensteuer (8–9 %) ist zudem als Sonderausgabe abziehbar. Nur Daumenwert — im Zweifel aus lassen |
 
 ### 2.6 Annahmen & Zeitraum (gemeinsam)
 
@@ -86,6 +87,7 @@ AfA-Methoden-Optionen (als Dropdown):
 | Alternativrendite (netto) | % | 5,0 | Rendite des nicht gebundenen Kapitals nach Steuer |
 | Verfügbares Kapital gesamt | € | 100.000 | Basis für den fairen Vergleich; EK pro Szenario ≤ dieser Wert |
 | Verkauf am Ende simulieren | Ja/Nein | Nein | inkl. Spekulationssteuer |
+| Veräußerungskosten bei Verkauf | € | 0 | Makler, Vorfälligkeitsentschädigung (bei Verkauf während der Zinsbindung real teuer), Notar/Löschung — mindern Nettoerlös **und** steuerpflichtigen Veräußerungsgewinn |
 
 ### 2.7 Finanzierung (pro Szenario A und B)
 
@@ -97,6 +99,7 @@ AfA-Methoden-Optionen (als Dropdown):
 | Zinsbindung | Jahre | 10 | 10 | danach Anschlussfinanzierung |
 | Anschlusszins p.a. | % | 4,0 | 4,0 | Zins nach Zinsbindung |
 | Jährliche Sondertilgung | € | 0 | 0 | optional |
+| Finanzierungskosten (einmalig) | € | 0 | 0 | Disagio/Damnum, Bereitstellungszinsen, Schätz-/Grundschuldkosten → im Jahr 1 sofort abziehbare Werbungskosten |
 
 Abgeleitet: `Darlehen = Anschaffungskosten_gesamt − Eigenkapital` (wenn negativ → 0 und Warnung).
 
@@ -142,22 +145,30 @@ tilgungJahr += min(sondertilgung, restschuld_vor_sondertilgung)
 ### 3.3 Miete & Kosten pro Jahr
 
 ```
-kaltmieteJahr_t   = kaltmieteMonat × 12 × (1 + mietsteigerung)^(t−1)
-mietNetto_t       = kaltmieteJahr_t × (1 − leerstand)
-bewirtschaftung_t = (verwaltung + instandhaltung) × (1 + kostensteigerung)^(t−1)
+kaltmieteJahr_t         = kaltmieteMonat × 12 × (1 + mietsteigerung)^(t−1)
+mietNetto_t             = kaltmieteJahr_t × (1 − leerstand)
+steigerung              = (1 + kostensteigerung)^(t−1)
+// absetzbare Bewirtschaftung (Werbungskosten): Verwaltung + tatsächliche Instandhaltung
+bewirtschaftungAbzieh_t = (verwaltung + instandhaltung) × steigerung
+// zusätzlicher, NICHT absetzbarer Liquiditätsabfluss: Zuführung Erhaltungsrücklage
+ruecklage_t             = ruecklageZufuehrung × steigerung
 ```
+
+> Trennung wichtig (§ 3.4/§ 3.5): `bewirtschaftungAbzieh_t` geht in die Werbungskosten, `ruecklage_t` **nur** in den Cashflow. Die Rücklagen-Zuführung ist erst bei tatsächlicher Verausgabung durch die WEG absetzbar (BFH IX R 19/21) — diese spätere Verausgabung bildet der Rechner bewusst nicht ab (Vereinfachung, § 7).
 
 ### 3.4 Steuerliche Betrachtung (Einkünfte aus V&V)
 
 Wichtig: **Tilgung ist nicht absetzbar** (Rückzahlung), **AfA ist absetzbar aber nicht liquiditätswirksam**.
 
 ```
-werbungskosten_t   = zinsJahr_t + afa_t + bewirtschaftung_t
+finKostenAbzieh_t  = (t == 1) ? finanzierungskosten : 0     // Disagio etc. sofort in Jahr 1
+werbungskosten_t   = zinsJahr_t + afa_t + bewirtschaftungAbzieh_t + finKostenAbzieh_t
 steuerErgebnis_t   = mietNetto_t − werbungskosten_t
 steuerEffekt_t     = − steuerErgebnis_t × grenzsteuersatz_eff
 ```
 
-- `grenzsteuersatz_eff = grenzsteuersatz × 1,055` wenn Soli/Kirche aktiviert (grob), sonst `= grenzsteuersatz`.
+- **Rücklagen-Zuführung `ruecklage_t` ist hier NICHT enthalten** (nicht absetzbar bei Einzahlung).
+- `grenzsteuersatz_eff = grenzsteuersatz × 1,055` wenn Soli/Kirche aktiviert (grober Daumenwert; Soli seit 2021 meist entfallen, Kirchensteuer als Sonderausgabe abziehbar), sonst `= grenzsteuersatz`.
 - `steuerErgebnis_t` negativ (Verlust) → `steuerEffekt_t` positiv = **Steuererstattung**.
 - `steuerErgebnis_t` positiv → `steuerEffekt_t` negativ = **Steuerzahlung**.
 - Annahme (dokumentieren): Verluste sind mit anderen Einkünften verrechenbar (Regelfall bei Vermietung).
@@ -166,7 +177,9 @@ steuerEffekt_t     = − steuerErgebnis_t × grenzsteuersatz_eff
 
 ```
 kapitaldienst_t     = zinsJahr_t + tilgungJahr_t          // + sondertilgung
-cashflowVorSteuer_t = mietNetto_t − bewirtschaftung_t − kapitaldienst_t
+// Liquiditätswirksam: absetzbare Bewirtschaftung + Rücklagen-Zuführung + einmalige Finanzierungskosten
+liquiKosten_t       = bewirtschaftungAbzieh_t + ruecklage_t + finKostenAbzieh_t
+cashflowVorSteuer_t = mietNetto_t − liquiKosten_t − kapitaldienst_t
 cashflowNachSteuer_t= cashflowVorSteuer_t + steuerEffekt_t
 ```
 
@@ -194,12 +207,13 @@ gesamtvermögen_t    = immobilienEK_t + portfolio_t
 ```
 wenn verkaufAktiv:
     verkaufspreis   = immobilienwert_N
-    wenn N < 10:                                            // Spekulationsfrist
-        veräußerungsgewinn = verkaufspreis − (anschaffungskosten − afaKumuliert_N)
+    wenn N < 10:                                            // Spekulationsfrist §23 EStG
+        // Veräußerungskosten mindern den steuerpflichtigen Gewinn
+        veräußerungsgewinn = verkaufspreis − (anschaffungskosten − afaKumuliert_N) − veräußerungskosten
         spekusteuer        = max(veräußerungsgewinn, 0) × grenzsteuersatz_eff
-    sonst:
+    sonst:                                                  // > 10 Jahre → steuerfrei
         spekusteuer        = 0
-    nettoVerkaufserlös = verkaufspreis − restschuld_N − spekusteuer
+    nettoVerkaufserlös = verkaufspreis − restschuld_N − spekusteuer − veräußerungskosten
     endvermögen        = portfolio_N + nettoVerkaufserlös
 sonst:
     endvermögen        = gesamtvermögen_N
@@ -259,10 +273,11 @@ Da das Format offen ist, empfehle ich für maximale Verbreitbarkeit **eine einze
 berechneVorab(config) → { afaBasis, anschaffungskosten, gebäudeanteil, ... }
 berechneDarlehenJahr(state, finanzierung, jahr) → { zinsJahr, tilgungJahr, restschuldEnde }
 berechneSzenario(config, finanzierung) → Array<{
-    jahr, mietNetto, bewirtschaftung, zins, tilgung, afa,
+    jahr, mietNetto, bewirtschaftungAbzieh, ruecklage, zins, tilgung, afa,
     steuerErgebnis, steuerEffekt, cashflowVorSteuer, cashflowNachSteuer,
     restschuld, immobilienwert, immobilienEK, portfolio, gesamtvermögen
 }>
+// bewirtschaftungAbzieh = absetzbar (Werbungskosten); ruecklage = nicht absetzbar, nur Cashflow
 berechneKennzahlen(reihe, config, finanzierung) → { cashflowM1, breakEvenJahr, restschuldN, endvermögen, irr }
 formatEUR(n), formatPct(n)
 ```
@@ -273,7 +288,7 @@ formatEUR(n), formatPct(n)
 
 Mit diesen Eingaben muss der Rechner näherungsweise (monatliche Zinsberechnung → kleine Abweichungen) folgende Werte liefern. Nutze das als Abnahmekriterium.
 
-**Gemeinsame Annahmen:** Kaufpreis 300.000; Grundstücksanteil 20 %; GrESt 6 %; Notar 1,5 %; Makler 3,57 %; AfA linear 2 %; Kaltmiete 1.000 €/Monat; Leerstand 2 %; Verwaltung 300 + Instandhaltung 1.200; Grenzsteuersatz 42 % (ohne Soli).
+**Gemeinsame Annahmen:** Kaufpreis 300.000; Grundstücksanteil 20 % (in diesem Abnahmefall bewusst 20 %, nicht der neue Default 25 %); GrESt 6 %; Notar 1,5 %; Makler 3,57 %; AfA linear 2 %; Kaltmiete 1.000 €/Monat; Leerstand 2 %; Verwaltung 300 + Instandhaltung 1.200 (beide absetzbar); **Zuführung Erhaltungsrücklage 0; Finanzierungskosten 0; Veräußerungskosten 0**; Grenzsteuersatz 42 % (ohne Soli). Mit diesen Nullwerten bleiben die unten genannten Zahlen unverändert gültig.
 
 Abgeleitet:
 - Kaufnebenkosten = 300.000 × 11,07 % = **33.210 €**
@@ -310,7 +325,10 @@ Erwartetes qualitatives Ergebnis: Szenario A hat den besseren laufenden Cashflow
 - Nach der Zinsbindung bleibt die monatliche Rate konstant; reale Anschlussfinanzierungen können abweichen.
 - Erhaltungsaufwand/Modernisierung, Sonder-AfA (z. B. § 7b, Denkmal § 7h/7i) und Einbauten sind nicht abgebildet — als optionale Erweiterung vorsehen.
 - Steuerlicher Verlust wird voll mit anderen Einkünften verrechnet (Regelfall, aber nicht garantiert).
-- Kirchensteuer/Soli nur als grober Aufschlag.
+- Kirchensteuer/Soli nur als grober Aufschlag (Soli seit 2021 meist entfallen; Kirchensteuer als Sonderausgabe nicht abgebildet).
+- **Erhaltungsrücklage-Zuführung** wird als nicht absetzbarer Cashflow geführt; die spätere absetzbare Verausgabung durch die WEG bildet der Rechner nicht ab (konservativ). Anschaffungsnahe Herstellungskosten (§ 6 Abs. 1 Nr. 1a EStG) werden nicht automatisch erkannt — nur als Hinweis am Eingabefeld.
+- **Finanzierungskosten** (Disagio, Bereitstellungszinsen) werden vereinfacht komplett im Jahr 1 abgesetzt; ein Disagio ist real ggf. über die Zinsbindung zu verteilen.
+- **Kaufpreisaufteilung** Grund/Gebäude wird als fester Prozentsatz eingegeben; die reale, mit dem Finanzamt abgestimmte Aufteilung kann abweichen und ändert die AfA-Basis spürbar.
 - Keine Inflationsbereinigung der Endwerte (nominal gerechnet); optionale reale Darstellung möglich.
 
 ---
