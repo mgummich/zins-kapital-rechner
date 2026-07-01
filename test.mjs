@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { berechneVorab, berechneAfa, berechneDarlehen } from './calc.js';
+import { berechneVorab, berechneAfa, berechneDarlehen, berechneSzenario } from './calc.js';
 
 const basisConfig = {
   kaufpreis: 300000,
@@ -86,6 +86,44 @@ test('berechneDarlehen: hoher Anschlusszins → keine negative Amortisation (Re-
   for (let i = 1; i < d.restschuld.length; i++) {
     assert.ok(d.restschuld[i] <= d.restschuld[i - 1] + 1e-6, `Jahr ${i + 1}: Restschuld steigt`);
   }
+});
+
+test('berechneSzenario: Szenario B Jahr 1 (Spec §6)', () => {
+  const r = berechneSzenario(basisConfig, finB);
+  const j1 = r[0];
+  assert.ok(Math.abs(j1.mietNetto - 11760) < 1, `mietNetto=${j1.mietNetto}`);
+  assert.ok(Math.abs(j1.bewirtschaftungAbzieh - 1500) < 1, `bewirt=${j1.bewirtschaftungAbzieh}`);
+  assert.ok(Math.abs(j1.steuerErgebnis - -6471) < 200, `steuerErgebnis=${j1.steuerErgebnis}`);
+  assert.ok(Math.abs(j1.steuerEffekt - 2718) < 100, `steuerEffekt=${j1.steuerEffekt}`);
+  assert.ok(Math.abs(j1.cashflowNachSteuer - -4321) < 200, `cfNachSt=${j1.cashflowNachSteuer}`);
+});
+
+test('berechneSzenario: Portfolio startet mit freiem Kapital', () => {
+  const r = berechneSzenario(basisConfig, finB); // verfügbar 100000, EK 40000 → frei 60000
+  // portfolio_1 = 60000*1.05 + cashflowNachSteuer_1
+  assert.ok(r[0].portfolio > 55000 && r[0].portfolio < 63000, `portfolio1=${r[0].portfolio}`);
+  assert.equal(r.length, 20);
+});
+
+test('berechneSzenario: mietNetto steigt mit Mietsteigerung', () => {
+  const r = berechneSzenario(basisConfig, finB);
+  assert.ok(r[1].mietNetto > r[0].mietNetto);
+});
+
+test('berechneSzenario: Erhaltungsrücklage senkt Cashflow, nicht die Steuer', () => {
+  const basis = berechneSzenario(basisConfig, finB)[0];
+  const mitRuecklage = berechneSzenario({ ...basisConfig, ruecklageZufuehrung: 1000 }, finB)[0];
+  assert.ok(Math.abs(mitRuecklage.steuerEffekt - basis.steuerEffekt) < 0.01, 'Rücklage nicht absetzbar → Steuer gleich');
+  assert.ok(Math.abs(mitRuecklage.cashflowNachSteuer - (basis.cashflowNachSteuer - 1000)) < 0.01, 'Rücklage mindert Cashflow voll');
+});
+
+test('berechneSzenario: Finanzierungskosten nur Jahr 1 absetzbar', () => {
+  const finMitKosten = { ...finB, finanzierungskosten: 2000 };
+  const r0 = berechneSzenario(basisConfig, finB);
+  const r1 = berechneSzenario(basisConfig, finMitKosten);
+  const stEff = 0.42;
+  assert.ok(Math.abs(r1[0].steuerEffekt - (r0[0].steuerEffekt + 2000 * stEff)) < 0.01, 'Jahr 1: +2000 Werbungskosten');
+  assert.ok(Math.abs(r1[1].steuerEffekt - r0[1].steuerEffekt) < 0.01, 'Jahr 2: kein Effekt');
 });
 
 export { basisConfig, finA, finB };

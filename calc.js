@@ -81,3 +81,52 @@ export function berechneDarlehen(finanzierung, anschaffungskosten, jahre) {
   }
   return { zins, tilgung, restschuld };
 }
+
+export function berechneSzenario(config, finanzierung) {
+  const { anschaffungskosten, afaBasis } = berechneVorab(config);
+  const { afaJahr } = berechneAfa(config, afaBasis, config.jahre);
+  const darlehen = berechneDarlehen(finanzierung, anschaffungskosten, config.jahre);
+  const stEff = config.grenzsteuersatz * (config.soliKirche ? 1.055 : 1);
+
+  const freiesKapitalStart = Math.max(0, config.verfügbaresKapital - finanzierung.eigenkapital);
+  let portfolioVor = freiesKapitalStart;
+
+  const zeilen = [];
+  for (let t = 1; t <= config.jahre; t++) {
+    const kaltmieteJahr = config.kaltmieteMonat * 12 * Math.pow(1 + config.mietsteigerung, t - 1);
+    const mietNetto = kaltmieteJahr * (1 - config.leerstand);
+    const steigerung = Math.pow(1 + config.kostensteigerung, t - 1);
+    const bewirtschaftungAbzieh = (config.verwaltung + config.instandhaltung) * steigerung; // Werbungskosten
+    const ruecklage = (config.ruecklageZufuehrung || 0) * steigerung; // nur Cashflow, nicht absetzbar
+    const finKostenAbzieh = t === 1 ? (finanzierung.finanzierungskosten || 0) : 0; // Disagio etc. Jahr 1
+    const zins = darlehen.zins[t - 1];
+    const tilgung = darlehen.tilgung[t - 1];
+    const afa = afaJahr[t - 1];
+
+    const werbungskosten = zins + afa + bewirtschaftungAbzieh + finKostenAbzieh;
+    const steuerErgebnis = mietNetto - werbungskosten;
+    const steuerEffekt = -steuerErgebnis * stEff; // Verlust → positiv (Erstattung)
+
+    const kapitaldienst = zins + tilgung;
+    const liquiKosten = bewirtschaftungAbzieh + ruecklage + finKostenAbzieh;
+    const cashflowVorSteuer = mietNetto - liquiKosten - kapitaldienst;
+    const cashflowNachSteuer = cashflowVorSteuer + steuerEffekt;
+
+    const restschuld = darlehen.restschuld[t - 1];
+    const immobilienwert = config.kaufpreis * Math.pow(1 + config.wertsteigerung, t);
+    const immobilienEK = immobilienwert - restschuld;
+
+    // positives Portfolio wächst mit altRendite; Unterdeckung mit teurerem Sollzins
+    const satz = portfolioVor >= 0 ? config.altRendite : config.sollzinsUnterdeckung;
+    const portfolio = portfolioVor * (1 + satz) + cashflowNachSteuer;
+    portfolioVor = portfolio;
+    const gesamtvermögen = immobilienEK + portfolio;
+
+    zeilen.push({
+      jahr: t, mietNetto, bewirtschaftungAbzieh, ruecklage, zins, tilgung, afa,
+      steuerErgebnis, steuerEffekt, cashflowVorSteuer, cashflowNachSteuer,
+      restschuld, immobilienwert, immobilienEK, portfolio, gesamtvermögen,
+    });
+  }
+  return zeilen;
+}
