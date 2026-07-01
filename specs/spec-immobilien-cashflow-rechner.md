@@ -1,6 +1,6 @@
 # Spec: Immobilien-Cashflow-Vergleichsrechner (Kapitalanlage)
 
-**Version:** 1.2
+**Version:** 1.3
 **Zweck:** Ein interaktiver Rechner, der für dieselbe vermietete Immobilie zwei Finanzierungsvarianten gegenüberstellt (z. B. „mehr Eigenkapital, niedriger Zins" vs. „weniger Eigenkapital, höherer Zins") und über einen frei wählbaren Zeitraum den vollständigen Cashflow nach Steuern, die Vermögensentwicklung und die Eigenkapitalrendite berechnet. Kernfrage: **Lohnt sich höheres Eigenkapital, oder ist ein etwas höherer Zins wegen Steuervorteil + freiem Kapital am Ende besser?**
 
 **Zielgruppe der Ausgabe:** Privatanleger:innen in Deutschland mit vermieteter Kapitalanlage-Immobilie.
@@ -85,6 +85,7 @@ AfA-Methoden-Optionen (als Dropdown):
 | Betrachtungszeitraum | Jahre | 20 | z. B. 10 / 20 / 30 |
 | Wertsteigerung Immobilie p.a. | % | 2,0 | für Vermögensberechnung |
 | Alternativrendite (netto) | % | 5,0 | Rendite des nicht gebundenen Kapitals nach Steuer |
+| Sollzins bei Unterdeckung | % | 9,0 | Zins auf ein **negatives** Seitenportfolio (Dispo/Lombard). Verhindert, dass laufende Unterdeckung fälschlich zur Anlagerendite „finanziert" wird — sonst systematische Verzerrung zugunsten hohen Hebels |
 | Verfügbares Kapital gesamt | € | 100.000 | Basis für den fairen Vergleich; EK pro Szenario ≤ dieser Wert |
 | Verkauf am Ende simulieren | Ja/Nein | Nein | inkl. Spekulationssteuer |
 | Veräußerungskosten bei Verkauf | € | 0 | Makler, Vorfälligkeitsentschädigung (bei Verkauf während der Zinsbindung real teuer), Notar/Löschung — mindern Nettoerlös **und** steuerpflichtigen Veräußerungsgewinn |
@@ -124,9 +125,14 @@ Bei **degressiver AfA (5 %)**: `afa_t = afaSatz × restbuchwert_{t-1}`, wobei `r
 ### 3.2 Darlehen: monatliche Annuitätsberechnung (pro Szenario)
 
 ```
-annuitätJahr   = darlehen × (sollzins + anfTilgung)
-monatsrate     = annuitätJahr / 12
+monatsrate     = darlehen × (sollzins + anfTilgung) / 12
 restschuld     = darlehen
+
+// Re-Annuisierung beim Anschluss: zu Beginn des Jahres t == zinsbindung+1 wird die
+// Rate neu aus der Restschuld und dem Anschlusszins bestimmt (reale Anschlussfinanzierung).
+// Verhindert negative Amortisation bei hohem Anschlusszins + fixer Rate.
+wenn t == zinsbindung + 1:
+    monatsrate = restschuld × (anschlusszins + anfTilgung) / 12
 
 für jeden Monat m im Jahr t:
     zinsMonat     = restschuld × (aktuellerZins / 12)
@@ -140,7 +146,7 @@ restschuld   = max(restschuld − sondertilgung, 0)
 tilgungJahr += min(sondertilgung, restschuld_vor_sondertilgung)
 ```
 
-`aktuellerZins = sollzins` solange `t ≤ zinsbindung`, danach `= anschlusszins`. Vereinfachung nach der Zinsbindung: **monatsrate konstant lassen**, nur Zins-/Tilgungssplit ändert sich durch den neuen Zins (dokumentieren, dass dies eine Annahme ist). Wird die Restschuld 0, enden Zins und Tilgung.
+`aktuellerZins = sollzins` solange `t ≤ zinsbindung`, danach `= anschlusszins`. Beim Anschluss (`t = zinsbindung+1`) wird die Rate **einmal neu annuisiert** (Restschuld × (anschlusszins + anfTilgung)); danach bleibt sie bis Laufzeitende konstant. Das entspricht einer realen Anschlussfinanzierung mit unveränderter Anfangstilgung und verhindert negative Amortisation. Als Vereinfachung dokumentieren, dass Anfangstilgung und Restlaufzeit-Konditionen frei gewählt werden könnten. Wird die Restschuld 0, enden Zins und Tilgung.
 
 ### 3.3 Miete & Kosten pro Jahr
 
@@ -196,7 +202,10 @@ immobilienEK_t       = immobilienwert_t − restschuld_t
 freiesKapital_start = verfügbaresKapital − eigenkapital     // ggf. 0
 portfolio_0         = freiesKapital_start
 für t = 1 … N:
-    portfolio_t = portfolio_{t−1} × (1 + altRendite) + cashflowNachSteuer_t
+    // positives Portfolio wächst mit altRendite; negatives (Unterdeckung)
+    // wird zum teureren sollzinsUnterdeckung fortgeschrieben
+    satz_t      = (portfolio_{t−1} ≥ 0) ? altRendite : sollzinsUnterdeckung
+    portfolio_t = portfolio_{t−1} × (1 + satz_t) + cashflowNachSteuer_t
 gesamtvermögen_t    = immobilienEK_t + portfolio_t
 ```
 
@@ -224,13 +233,17 @@ Beachte: Die kumulierte AfA mindert die Anschaffungskosten-Basis und **erhöht**
 ### 3.8 Kennzahlen (pro Szenario)
 
 - **Cashflow nach Steuer, Jahr 1** (monatlich): `cashflowNachSteuer_1 / 12`
-- **Break-even-Jahr:** erstes `t` mit `cashflowNachSteuer_t ≥ 0`
+- **Break-even Cashflow-Jahr:** erstes `t` mit `cashflowNachSteuer_t ≥ 0` (Jahr, ab dem der laufende Cashflow positiv wird — **nicht** Amortisation des Eigenkapitals).
+- **Amortisations-Jahr (kumulativ):** erstes `t` mit `Σ_{i≤t} cashflowNachSteuer_i ≥ 0` (kumulierte Überschüsse gleichen kumulierte Unterdeckungen aus); `null`, falls im Zeitraum nicht erreicht.
 - **Restschuld nach N Jahren:** `restschuld_N`
-- **Immobilien-Eigenkapital nach N Jahren:** `immobilienEK_N`
-- **Gesamt-/Endvermögen nach N Jahren:** `endvermögen`
+- **Immobilien-Eigenkapital nach N Jahren:** `immobilienEK_N` (Buchwert, unrealisiert — vor Verkaufskosten/latenter Steuer).
+- **Endvermögen nach N Jahren:** `endvermögen` — **Primärmetrik** für den Szenariovergleich (hält das verfügbare Kapital konstant, bildet Steuervorteil, Entschuldung, Wertzuwachs und Alternativanlage in einer Zahl ab).
+- **Netto-Liquidationswert bei Verkauf in N:** `terminalNetto = immobilienEK_N − veräußerungskosten − latenteSpekusteuer`, mit `latenteSpekusteuer = (N < 10) ? max(immobilienwert_N − (anschaffungskosten − afaKumuliert_N) − veräußerungskosten, 0) × grenzsteuersatz_eff : 0`. Zeigt, was nach Realisierung bliebe.
 - **Eigenkapitalrendite p.a. (IRR):** interner Zinsfuß der Zahlungsreihe
-  `[−eigenkapital, cashflowNachSteuer_1, …, cashflowNachSteuer_{N−1}, cashflowNachSteuer_N + nettoVerkaufserlös]`.
-  IRR per Newton-Verfahren oder Bisektion lösen. Wenn kein Verkauf: letzten Cashflow um `immobilienEK_N` erhöhen (fiktiver Verkauf zum Buchwert-EK), damit die Rendite den Vermögensaufbau enthält — als „EK-Rendite inkl. Wertzuwachs" labeln.
+  `[−eigenkapital, cashflowNachSteuer_1, …, cashflowNachSteuer_{N−1}, cashflowNachSteuer_N + T]`,
+  wobei `T = nettoVerkaufserlös` (wenn Verkauf aktiv) bzw. `T = portfolio-neutraler terminalNetto` (wenn kein Verkauf → fiktive **Netto**-Liquidation, damit beide IRR-Varianten vergleichbar sind). Per Bisektion lösen.
+  **Caveat:** Bei mehrfachem Vorzeichenwechsel der Cashflows ist der IRR nicht eindeutig; zudem ignoriert er, dass Unterdeckungen aus dem Portfolio finanziert werden. Deshalb ist **Endvermögen die maßgebliche Zielgröße**, IRR nur ergänzend.
+- **Kritische Alternativrendite (A↔B):** die Alternativrendite, bei der `endvermögen_A = endvermögen_B`. Per Bisektion über `altRendite ∈ [0, 0.20]` lösen (beide Szenarien mit derselben Variation neu rechnen). Ergebnis: „Unterhalb X % gewinnt Szenario mit mehr EK, oberhalb das mit weniger EK." Kein Vorzeichenwechsel im Intervall → `null` (ein Szenario dominiert durchgängig). **Kernzahl der Entscheidung.**
 
 ---
 
@@ -239,10 +252,10 @@ Beachte: Die kumulierte AfA mindert die Anschaffungskosten-Basis und **erhöht**
 ### 4.1 Layout
 
 1. **Eingabe-Bereich** oben, in aufklappbaren Gruppen: *Objekt & Kauf*, *AfA*, *Miete*, *Kosten*, *Steuer*, *Annahmen*. Darunter zwei Spalten *Finanzierung A* / *Finanzierung B*.
-2. **KPI-Karten** (Grid, für A und B nebeneinander): Cashflow/Monat Jahr 1, Break-even-Jahr, Restschuld nach N Jahren, Endvermögen nach N Jahren, EK-Rendite p.a.
+2. **KPI-Karten** (Grid, für A und B nebeneinander): Cashflow/Monat Jahr 1, Break-even Cashflow-Jahr, Amortisations-Jahr, Restschuld nach N Jahren, **Endvermögen nach N Jahren** (hervorgehoben als Primärmetrik), EK-Rendite p.a. (mit dezentem Hinweis „ergänzend"). Zusätzlich **eine gemeinsame Karte „Kritische Alternativrendite (A↔B)"**.
 3. **Verlaufs-Chart** (Liniendiagramm): Gesamtvermögen A vs. B über die Jahre; optional umschaltbar auf „kumulierter Cashflow" und „Restschuld".
 4. **Jahres-Tabelle** (aufklappbar): pro Jahr Spalten Miete netto, Zins, Tilgung, AfA, Steuer-Effekt, Cashflow n. St., Restschuld, Vermögen — je Szenario umschaltbar oder als zwei Tabellen.
-5. **Fazit-Banner:** vergleicht `endvermögen` (primär) und den Cashflow; nennt die Differenz in € und benennt den Treiber (Steuervorteil, Alternativrendite, Zinsdifferenz).
+5. **Fazit-Banner:** vergleicht `endvermögen` (primär) und den Cashflow; nennt die Differenz in € und den Treiber (Steuervorteil, Alternativrendite, Zinsdifferenz) sowie die kritische Alternativrendite („ab X % kippt das Ergebnis").
 6. **Disclaimer** unten: keine Steuer-/Rechtsberatung; Zinsen nur bei Vermietung absetzbar; Werte sind Prognosen.
 
 ### 4.2 Formatierung & Verhalten
@@ -278,7 +291,8 @@ berechneSzenario(config, finanzierung) → Array<{
     restschuld, immobilienwert, immobilienEK, portfolio, gesamtvermögen
 }>
 // bewirtschaftungAbzieh = absetzbar (Werbungskosten); ruecklage = nicht absetzbar, nur Cashflow
-berechneKennzahlen(reihe, config, finanzierung) → { cashflowM1, breakEvenJahr, restschuldN, endvermögen, irr }
+berechneKennzahlen(reihe, config, finanzierung) → { cashflowM1, breakEvenJahr, amortisationJahr, restschuldN, immobilienEK_N, endvermögen, terminalNetto, irr }
+kritischeAltRendite(config, finA, finB) → number | null   // altRendite mit endvermögen_A = endvermögen_B (Bisektion 0…20%)
 formatEUR(n), formatPct(n)
 ```
 
@@ -288,7 +302,7 @@ formatEUR(n), formatPct(n)
 
 Mit diesen Eingaben muss der Rechner näherungsweise (monatliche Zinsberechnung → kleine Abweichungen) folgende Werte liefern. Nutze das als Abnahmekriterium.
 
-**Gemeinsame Annahmen:** Kaufpreis 300.000; Grundstücksanteil 20 % (in diesem Abnahmefall bewusst 20 %, nicht der neue Default 25 %); GrESt 6 %; Notar 1,5 %; Makler 3,57 %; AfA linear 2 %; Kaltmiete 1.000 €/Monat; Leerstand 2 %; Verwaltung 300 + Instandhaltung 1.200 (beide absetzbar); **Zuführung Erhaltungsrücklage 0; Finanzierungskosten 0; Veräußerungskosten 0**; Grenzsteuersatz 42 % (ohne Soli). Mit diesen Nullwerten bleiben die unten genannten Zahlen unverändert gültig.
+**Gemeinsame Annahmen:** Kaufpreis 300.000; Grundstücksanteil 20 % (in diesem Abnahmefall bewusst 20 %, nicht der neue Default 25 %); GrESt 6 %; Notar 1,5 %; Makler 3,57 %; AfA linear 2 %; Kaltmiete 1.000 €/Monat; Leerstand 2 %; Verwaltung 300 + Instandhaltung 1.200 (beide absetzbar); **Zuführung Erhaltungsrücklage 0; Finanzierungskosten 0; Veräußerungskosten 0**; Grenzsteuersatz 42 % (ohne Soli). Mit diesen Nullwerten bleiben die unten genannten Zahlen unverändert gültig. `sollzinsUnterdeckung`, Re-Annuisierung und `beleihungswertAbschlag` betreffen nur spätere Jahre bzw. den EK-Modus und ändern die hier geprüften **Jahr-1**-Werte nicht.
 
 Abgeleitet:
 - Kaufnebenkosten = 300.000 × 11,07 % = **33.210 €**
@@ -322,7 +336,10 @@ Erwartetes qualitatives Ergebnis: Szenario A hat den besseren laufenden Cashflow
 ## 7. Bewusste Vereinfachungen (im UI transparent machen)
 
 - Zinsberechnung monatlich, aber ohne unterjährige Mietsteigerung (jährliche Schritte).
-- Nach der Zinsbindung bleibt die monatliche Rate konstant; reale Anschlussfinanzierungen können abweichen.
+- Beim Anschluss wird die Rate einmal neu annuisiert (Restschuld × (anschlusszins + anfTilgung)) und bleibt danach konstant; eine reale Anschlussfinanzierung kann Tilgung/Laufzeit anders wählen. Diese Annahme verhindert negative Amortisation bei hohem Anschlusszins.
+- Unterdeckung (negatives Seitenportfolio) wird mit `sollzinsUnterdeckung` fortgeschrieben; reale Finanzierungskosten einer Liquiditätslücke können abweichen. Ohne diese Trennung würde das Modell hohen Hebel systematisch bevorteilen.
+- **IRR nicht eindeutig** bei mehrfachem Vorzeichenwechsel; er ignoriert die Finanzierung von Unterdeckungen. Endvermögen ist die maßgebliche Zielgröße, IRR nur ergänzend.
+- LTV im EK-Modus wird auf den Beleihungswert (Kaufpreis − Abschlag) bezogen; der reale Beleihungswert je Bank kann abweichen.
 - Erhaltungsaufwand/Modernisierung, Sonder-AfA (z. B. § 7b, Denkmal § 7h/7i) und Einbauten sind nicht abgebildet — als optionale Erweiterung vorsehen.
 - Steuerlicher Verlust wird voll mit anderen Einkünften verrechnet (Regelfall, aber nicht garantiert).
 - Kirchensteuer/Soli nur als grober Aufschlag (Soli seit 2021 meist entfallen; Kirchensteuer als Sonderausgabe nicht abgebildet).
@@ -351,6 +368,7 @@ Statt des A/B-Finanzierungsblocks (2.7):
 | Anfängliche Tilgung p.a. | % | 2,0 | für die Annuität |
 | Zinsbindung | Jahre | 10 | wie 2.7 |
 | Anschlusszins p.a. | % | 4,0 | wie 2.7 |
+| Beleihungswert-Abschlag | % | 10 | Banken bemessen den LTV am Beleihungswert (≈ Kaufpreis − Abschlag), nicht am Kaufpreis → reale LTV höher, Zinsstufe schlechter. 0 = LTV auf Kaufpreis |
 | EK-Regler | € | — | 0 … verfügbares Kapital; Schrittweite z. B. 5.000 € |
 | **LTV→Zins-Stufen** | Tabelle | s. u. | editierbar; Nutzer-Stufen |
 
@@ -364,7 +382,8 @@ Statt des A/B-Finanzierungsblocks (2.7):
 | > 90 % | 4,3 % |
 
 ```
-LTV       = darlehen / kaufpreis          // Nebenkosten nicht beleihbar
+beleihungswert = kaufpreis × (1 − beleihungswertAbschlag)
+LTV       = darlehen / beleihungswert     // Nebenkosten nicht beleihbar; Basis = Beleihungswert
 sollzins  = erste Stufe mit LTV ≤ stufe.maxLTV   // sonst höchste Stufe
 ```
 
