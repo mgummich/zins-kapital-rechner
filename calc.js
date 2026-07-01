@@ -130,3 +130,83 @@ export function berechneSzenario(config, finanzierung) {
   }
   return zeilen;
 }
+
+export function irr(zahlungen) {
+  const npv = (rate) => zahlungen.reduce((s, z, i) => s + z / Math.pow(1 + rate, i), 0);
+  let lo = -0.9999, hi = 1.0;
+  if (npv(lo) * npv(hi) > 0) return NaN; // kein Vorzeichenwechsel → keine reelle Lösung im Bereich
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    const v = npv(mid);
+    if (Math.abs(v) < 1e-6) return mid;
+    if (npv(lo) * v < 0) hi = mid; else lo = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+export function berechneKennzahlen(reihe, config, finanzierung) {
+  const N = config.jahre;
+  const cashflowM1 = reihe[0].cashflowNachSteuer / 12;
+  const beIdx = reihe.findIndex((z) => z.cashflowNachSteuer >= 0);
+  const breakEvenJahr = beIdx === -1 ? null : beIdx + 1;
+  const restschuldN = reihe[N - 1].restschuld;
+  const immobilienEK_N = reihe[N - 1].immobilienEK;
+
+  // Amortisation: erstes Jahr mit kumuliertem Cashflow ≥ 0 (§3.8)
+  let kum = 0;
+  let amortisationJahr = null;
+  for (let t = 0; t < N; t++) {
+    kum += reihe[t].cashflowNachSteuer;
+    if (kum >= 0) { amortisationJahr = t + 1; break; }
+  }
+
+  // Netto-Liquidationswert: gemeinsam für Verkauf UND IRR-Fallback (Vergleichbarkeit, F3)
+  const { anschaffungskosten, afaBasis } = berechneVorab(config);
+  const { afaKumuliert } = berechneAfa(config, afaBasis, N);
+  const stEff = config.grenzsteuersatz * (config.soliKirche ? 1.055 : 1);
+  const vk = config.veräußerungskosten || 0; // Makler, Vorfälligkeitsentschädigung
+  const verkaufspreis = reihe[N - 1].immobilienwert;
+  let latenteSpekusteuer = 0;
+  if (N < 10) {
+    const gewinn = verkaufspreis - (anschaffungskosten - afaKumuliert[N - 1]) - vk;
+    latenteSpekusteuer = Math.max(gewinn, 0) * stEff;
+  }
+  const terminalNetto = immobilienEK_N - vk - latenteSpekusteuer; // = verkaufspreis − restschuld − vk − steuer
+
+  // Endvermögen: bei Verkauf realisiert (nur Netto-Liquidationswert ohne Portfolio),
+  // sonst Gesamtvermögen (unrealisiert mit Immobilie und Portfolio)
+  const endvermögen = config.verkaufAktiv
+    ? terminalNetto
+    : reihe[N - 1].gesamtvermögen;
+
+  // IRR immer mit NETTO-Terminal → mit/ohne Verkauf vergleichbar (F3)
+  const zahlungen = [-finanzierung.eigenkapital];
+  for (let t = 1; t <= N; t++) {
+    let z = reihe[t - 1].cashflowNachSteuer;
+    if (t === N) z += terminalNetto;
+    zahlungen.push(z);
+  }
+
+  return { cashflowM1, breakEvenJahr, amortisationJahr, restschuldN, immobilienEK_N, endvermögen, terminalNetto, irr: irr(zahlungen) };
+}
+
+// Kritische Alternativrendite: altRendite, bei der Endvermögen A == B (F2). null = kein Umschlag in [0,20%].
+export function kritischeAltRendite(config, finA, finB) {
+  const diff = (alt) => {
+    const c = { ...config, altRendite: alt };
+    const eA = berechneKennzahlen(berechneSzenario(c, finA), c, finA).endvermögen;
+    const eB = berechneKennzahlen(berechneSzenario(c, finB), c, finB).endvermögen;
+    return eA - eB;
+  };
+  let lo = 0, hi = 0.20;
+  const dLo = diff(lo);
+  if (dLo === 0) return lo;
+  if (dLo * diff(hi) > 0) return null; // kein Vorzeichenwechsel → ein Szenario dominiert durchgängig
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    const d = diff(mid);
+    if (Math.abs(d) < 1) return mid;
+    if (diff(lo) * d < 0) hi = mid; else lo = mid;
+  }
+  return (lo + hi) / 2;
+}

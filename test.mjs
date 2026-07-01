@@ -126,4 +126,49 @@ test('berechneSzenario: Finanzierungskosten nur Jahr 1 absetzbar', () => {
   assert.ok(Math.abs(r1[1].steuerEffekt - r0[1].steuerEffekt) < 0.01, 'Jahr 2: kein Effekt');
 });
 
+import { irr, berechneKennzahlen, kritischeAltRendite } from './calc.js';
+
+test('irr: bekannte Zahlungsreihe', () => {
+  assert.ok(Math.abs(irr([-100, 110]) - 0.10) < 1e-4, `irr=${irr([-100, 110])}`);
+  assert.ok(Math.abs(irr([-1000, 0, 0, 1331]) - 0.10) < 1e-3);
+});
+
+test('berechneKennzahlen: Szenario B Kennzahlen', () => {
+  const r = berechneSzenario(basisConfig, finB);
+  const k = berechneKennzahlen(r, basisConfig, finB);
+  assert.ok(Math.abs(k.cashflowM1 - -360) < 30, `cfM1=${k.cashflowM1}`); // ≈ -360 €/Monat
+  assert.equal(k.restschuldN, r[19].restschuld);
+  assert.ok(typeof k.endvermögen === 'number');
+  assert.ok(typeof k.irr === 'number' && isFinite(k.irr));
+});
+
+test('berechneKennzahlen: Verkauf aktiv verändert Endvermögen', () => {
+  const r = berechneSzenario({ ...basisConfig, verkaufAktiv: true }, finB);
+  const kMitVerkauf = berechneKennzahlen(r, { ...basisConfig, verkaufAktiv: true }, finB);
+  const kOhne = berechneKennzahlen(berechneSzenario(basisConfig, finB), basisConfig, finB);
+  assert.notEqual(Math.round(kMitVerkauf.endvermögen), Math.round(kOhne.endvermögen));
+});
+
+test('berechneKennzahlen: terminalNetto ≤ Buchwert-EK bei N<10 (Kosten/Steuer abgezogen)', () => {
+  const cfg = { ...basisConfig, jahre: 8, veräußerungskosten: 5000 };
+  const k = berechneKennzahlen(berechneSzenario(cfg, finB), cfg, finB);
+  assert.ok(k.terminalNetto <= k.immobilienEK_N, 'netto darf Buchwert nicht übersteigen');
+  assert.ok(k.terminalNetto < k.immobilienEK_N, 'Kosten+latente Steuer senken den Wert');
+});
+
+test('kritischeAltRendite: Umschlagpunkt A↔B liegt im Intervall oder null', () => {
+  const kr = kritischeAltRendite(basisConfig, finA, finB);
+  assert.ok(kr === null || (kr > 0 && kr < 0.20), `kr=${kr}`);
+  if (kr !== null) {
+    const ev = (alt, fin) => {
+      const c = { ...basisConfig, altRendite: alt };
+      return berechneKennzahlen(berechneSzenario(c, fin), c, fin).endvermögen;
+    };
+    // unterhalb: mehr EK (A) vorn; oberhalb: weniger EK (B) vorn → Vorzeichenwechsel
+    const unten = ev(kr - 0.02, finA) - ev(kr - 0.02, finB);
+    const oben = ev(kr + 0.02, finA) - ev(kr + 0.02, finB);
+    assert.ok(unten * oben < 0, 'Endvermögen-Differenz wechselt Vorzeichen um kr');
+  }
+});
+
 export { basisConfig, finA, finB };
