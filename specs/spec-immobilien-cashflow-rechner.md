@@ -1,0 +1,393 @@
+# Spec: Immobilien-Cashflow-Vergleichsrechner (Kapitalanlage)
+
+**Version:** 1.1
+**Zweck:** Ein interaktiver Rechner, der für dieselbe vermietete Immobilie zwei Finanzierungsvarianten gegenüberstellt (z. B. „mehr Eigenkapital, niedriger Zins" vs. „weniger Eigenkapital, höherer Zins") und über einen frei wählbaren Zeitraum den vollständigen Cashflow nach Steuern, die Vermögensentwicklung und die Eigenkapitalrendite berechnet. Kernfrage: **Lohnt sich höheres Eigenkapital, oder ist ein etwas höherer Zins wegen Steuervorteil + freiem Kapital am Ende besser?**
+
+**Zielgruppe der Ausgabe:** Privatanleger:innen in Deutschland mit vermieteter Kapitalanlage-Immobilie.
+
+> **Wichtiger Hinweis für die Umsetzung:** Der Rechner ist ein Planungswerkzeug, keine Steuer- oder Rechtsberatung. Dieser Disclaimer muss sichtbar im UI stehen.
+
+---
+
+## 1. Überblick der Funktionalität
+
+Der Nutzer gibt einmalig die Objekt-, Miet-, Kosten- und Steuerdaten ein sowie ein gemeinsames „verfügbares Kapital". Für zwei Finanzierungsszenarien (A und B) gibt er jeweils Eigenkapital, Sollzins, anfängliche Tilgung und Zinsbindung ein. Der Rechner berechnet Jahr für Jahr für beide Szenarien parallel:
+
+- Mieteinnahmen (mit Steigerung und Leerstand)
+- Zins- und Tilgungsanteil (Annuitätendarlehen, monatliche Berechnung)
+- AfA (Gebäudeabschreibung)
+- steuerliches Ergebnis aus Vermietung und Verpachtung und daraus die Steuerersparnis/-last
+- Cashflow vor und nach Steuern
+- Restschuld, Immobilienwert, Immobilien-Eigenkapital
+- ein „Seitenportfolio" aus nicht gebundenem Kapital, das zur Alternativrendite angelegt wird (macht Szenarien mit unterschiedlichem EK-Einsatz fair vergleichbar)
+- optional: Verkauf am Ende inkl. Spekulationssteuer
+
+Ausgabe: KPI-Karten, ein Verlaufs-Chart (kumuliertes Vermögen beider Szenarien), eine Jahres-Tabelle und ein Fazit-Banner, welches Szenario mehr Vermögen aufbaut bzw. den besseren Cashflow liefert.
+
+---
+
+## 2. Eingabefelder
+
+### 2.1 Objekt & Kauf (gemeinsam)
+
+| Feld | Typ | Default | Hinweis |
+|---|---|---|---|
+| Kaufpreis | € | 300.000 | reiner Kaufpreis der Immobilie |
+| Grundstücksanteil | % | 20 | nicht abschreibbar; Rest = Gebäudeanteil |
+| Grunderwerbsteuer | % | 6,0 | je Bundesland 3,5–6,5 % |
+| Notar & Grundbuch | % | 1,5 | vom Kaufpreis |
+| Maklerprovision | % | 3,57 | Käuferanteil, 0 wenn ohne Makler |
+
+Abgeleitet: `Kaufnebenkosten = Kaufpreis × (GrESt% + Notar% + Makler%)`, `Anschaffungskosten_gesamt = Kaufpreis + Kaufnebenkosten`.
+
+### 2.2 AfA (Abschreibung, gemeinsam)
+
+| Feld | Typ | Default | Hinweis |
+|---|---|---|---|
+| AfA-Methode | Auswahl | linear 2 % | Optionen unten |
+| AfA-Satz (bei linear) | % | 2,0 | wählbar |
+
+AfA-Methoden-Optionen (als Dropdown):
+- **linear 2 %** — Standard für Gebäude, Fertigstellung ab 1925 (§ 7 Abs. 4 EStG)
+- **linear 2,5 %** — Gebäude vor 1925
+- **linear 3 %** — Neubau mit Fertigstellung/Bauantrag ab 2023
+- **degressiv 5 %** — Wohn-Neubau, Baubeginn/Kauf im Zeitfenster 10/2023–09/2029; 5 % vom jeweiligen Restbuchwert, mit optionalem Wechsel zu linear wenn günstiger
+- **individuell** — Nutzer gibt eigenen Satz ein
+
+### 2.3 Miete & Einnahmen (gemeinsam)
+
+| Feld | Typ | Default | Hinweis |
+|---|---|---|---|
+| Kaltmiete pro Monat | € | 1.000 | Netto-Kaltmiete |
+| Mietsteigerung p.a. | % | 1,5 | jährliche Steigerung |
+| Leerstandsquote | % | 2 | Anteil ausfallender Miete |
+
+### 2.4 Laufende Kosten (nicht umlagefähig, gemeinsam)
+
+| Feld | Typ | Default | Hinweis |
+|---|---|---|---|
+| Nicht umlagefähige Verwaltung p.a. | € | 300 | z. B. WEG-Verwaltervergütung |
+| Instandhaltungsrücklage p.a. | € | 1.200 | Faustregel ~1 €/m²/Monat |
+| Kostensteigerung p.a. | % | 1,5 | optional, wächst mit den Jahren |
+
+### 2.5 Steuer (gemeinsam)
+
+| Feld | Typ | Default | Hinweis |
+|---|---|---|---|
+| Persönlicher Grenzsteuersatz | % | 42 | Spitzensteuersatz einsetzbar |
+| Soli & Kirchensteuer berücksichtigen | Ja/Nein | Nein | optional Aufschlag ~1,1× |
+
+### 2.6 Annahmen & Zeitraum (gemeinsam)
+
+| Feld | Typ | Default | Hinweis |
+|---|---|---|---|
+| Betrachtungszeitraum | Jahre | 20 | z. B. 10 / 20 / 30 |
+| Wertsteigerung Immobilie p.a. | % | 2,0 | für Vermögensberechnung |
+| Alternativrendite (netto) | % | 5,0 | Rendite des nicht gebundenen Kapitals nach Steuer |
+| Verfügbares Kapital gesamt | € | 100.000 | Basis für den fairen Vergleich; EK pro Szenario ≤ dieser Wert |
+| Verkauf am Ende simulieren | Ja/Nein | Nein | inkl. Spekulationssteuer |
+
+### 2.7 Finanzierung (pro Szenario A und B)
+
+| Feld | Typ | Default A | Default B | Hinweis |
+|---|---|---|---|---|
+| Eigenkapital | € | 100.000 | 40.000 | fließt in Darlehen ein |
+| Sollzins p.a. | % | 3,5 | 3,9 | Nominalzins |
+| Anfängliche Tilgung p.a. | % | 2,0 | 2,0 | für die Annuität |
+| Zinsbindung | Jahre | 10 | 10 | danach Anschlussfinanzierung |
+| Anschlusszins p.a. | % | 4,0 | 4,0 | Zins nach Zinsbindung |
+| Jährliche Sondertilgung | € | 0 | 0 | optional |
+
+Abgeleitet: `Darlehen = Anschaffungskosten_gesamt − Eigenkapital` (wenn negativ → 0 und Warnung).
+
+---
+
+## 3. Rechenlogik
+
+Alle Beträge in Euro, Zinssätze als Dezimalzahl (z. B. 3,5 % → 0,035). Die Kern-Schleife läuft pro Jahr `t = 1 … N`; das Darlehen wird monatlich abgerechnet (genauer als jährlich).
+
+### 3.1 Vorab (einmalig, gemeinsam)
+
+```
+gebäudeanteil        = 1 − grundstücksanteil
+kaufnebenkosten      = kaufpreis × (grEStSatz + notarSatz + maklerSatz)
+anschaffungskosten   = kaufpreis + kaufnebenkosten
+afaBasis             = anschaffungskosten × gebäudeanteil
+afaJahr_linear       = afaBasis × afaSatz            // konstant bei linearer AfA
+```
+
+Bei **degressiver AfA (5 %)**: `afa_t = afaSatz × restbuchwert_{t-1}`, wobei `restbuchwert_0 = afaBasis`. Sobald `afaJahr_linear_verbleibend > afa_t`, auf lineare AfA des Restbuchwerts umstellen (Standard-Wahlrecht). Kumulierte AfA für die Spekulationssteuer mitführen.
+
+### 3.2 Darlehen: monatliche Annuitätsberechnung (pro Szenario)
+
+```
+annuitätJahr   = darlehen × (sollzins + anfTilgung)
+monatsrate     = annuitätJahr / 12
+restschuld     = darlehen
+
+für jeden Monat m im Jahr t:
+    zinsMonat     = restschuld × (aktuellerZins / 12)
+    tilgungMonat  = monatsrate − zinsMonat
+    restschuld    = restschuld − tilgungMonat
+    zinsJahr     += zinsMonat
+    tilgungJahr  += tilgungMonat
+
+// am Jahresende optionale Sondertilgung:
+restschuld   = max(restschuld − sondertilgung, 0)
+tilgungJahr += min(sondertilgung, restschuld_vor_sondertilgung)
+```
+
+`aktuellerZins = sollzins` solange `t ≤ zinsbindung`, danach `= anschlusszins`. Vereinfachung nach der Zinsbindung: **monatsrate konstant lassen**, nur Zins-/Tilgungssplit ändert sich durch den neuen Zins (dokumentieren, dass dies eine Annahme ist). Wird die Restschuld 0, enden Zins und Tilgung.
+
+### 3.3 Miete & Kosten pro Jahr
+
+```
+kaltmieteJahr_t   = kaltmieteMonat × 12 × (1 + mietsteigerung)^(t−1)
+mietNetto_t       = kaltmieteJahr_t × (1 − leerstand)
+bewirtschaftung_t = (verwaltung + instandhaltung) × (1 + kostensteigerung)^(t−1)
+```
+
+### 3.4 Steuerliche Betrachtung (Einkünfte aus V&V)
+
+Wichtig: **Tilgung ist nicht absetzbar** (Rückzahlung), **AfA ist absetzbar aber nicht liquiditätswirksam**.
+
+```
+werbungskosten_t   = zinsJahr_t + afa_t + bewirtschaftung_t
+steuerErgebnis_t   = mietNetto_t − werbungskosten_t
+steuerEffekt_t     = − steuerErgebnis_t × grenzsteuersatz_eff
+```
+
+- `grenzsteuersatz_eff = grenzsteuersatz × 1,055` wenn Soli/Kirche aktiviert (grob), sonst `= grenzsteuersatz`.
+- `steuerErgebnis_t` negativ (Verlust) → `steuerEffekt_t` positiv = **Steuererstattung**.
+- `steuerErgebnis_t` positiv → `steuerEffekt_t` negativ = **Steuerzahlung**.
+- Annahme (dokumentieren): Verluste sind mit anderen Einkünften verrechenbar (Regelfall bei Vermietung).
+
+### 3.5 Cashflow pro Jahr
+
+```
+kapitaldienst_t     = zinsJahr_t + tilgungJahr_t          // + sondertilgung
+cashflowVorSteuer_t = mietNetto_t − bewirtschaftung_t − kapitaldienst_t
+cashflowNachSteuer_t= cashflowVorSteuer_t + steuerEffekt_t
+```
+
+### 3.6 Vermögensentwicklung pro Jahr
+
+```
+immobilienwert_t     = kaufpreis × (1 + wertsteigerung)^t
+immobilienEK_t       = immobilienwert_t − restschuld_t
+```
+
+**Seitenportfolio** (macht die Szenarien fair vergleichbar): Das beim Kauf nicht eingesetzte Kapital plus laufende Cashflow-Überschüsse werden zur Alternativrendite angelegt; negative Cashflows werden aus dem Portfolio gedeckt.
+
+```
+freiesKapital_start = verfügbaresKapital − eigenkapital     // ggf. 0
+portfolio_0         = freiesKapital_start
+für t = 1 … N:
+    portfolio_t = portfolio_{t−1} × (1 + altRendite) + cashflowNachSteuer_t
+gesamtvermögen_t    = immobilienEK_t + portfolio_t
+```
+
+> Hinweis: Setzt der Nutzer in beiden Szenarien dasselbe Eigenkapital, ist `freiesKapital_start` gleich und der Vergleich läuft rein über Cashflow und Entschuldung. Setzt er unterschiedliches EK, bildet das Seitenportfolio den Opportunitätsvorteil des freieren Kapitals ab.
+
+### 3.7 Optionaler Verkauf am Ende (Jahr N)
+
+```
+wenn verkaufAktiv:
+    verkaufspreis   = immobilienwert_N
+    wenn N < 10:                                            // Spekulationsfrist
+        veräußerungsgewinn = verkaufspreis − (anschaffungskosten − afaKumuliert_N)
+        spekusteuer        = max(veräußerungsgewinn, 0) × grenzsteuersatz_eff
+    sonst:
+        spekusteuer        = 0
+    nettoVerkaufserlös = verkaufspreis − restschuld_N − spekusteuer
+    endvermögen        = portfolio_N + nettoVerkaufserlös
+sonst:
+    endvermögen        = gesamtvermögen_N
+```
+
+Beachte: Die kumulierte AfA mindert die Anschaffungskosten-Basis und **erhöht** damit den steuerpflichtigen Veräußerungsgewinn innerhalb der 10-Jahres-Frist.
+
+### 3.8 Kennzahlen (pro Szenario)
+
+- **Cashflow nach Steuer, Jahr 1** (monatlich): `cashflowNachSteuer_1 / 12`
+- **Break-even-Jahr:** erstes `t` mit `cashflowNachSteuer_t ≥ 0`
+- **Restschuld nach N Jahren:** `restschuld_N`
+- **Immobilien-Eigenkapital nach N Jahren:** `immobilienEK_N`
+- **Gesamt-/Endvermögen nach N Jahren:** `endvermögen`
+- **Eigenkapitalrendite p.a. (IRR):** interner Zinsfuß der Zahlungsreihe
+  `[−eigenkapital, cashflowNachSteuer_1, …, cashflowNachSteuer_{N−1}, cashflowNachSteuer_N + nettoVerkaufserlös]`.
+  IRR per Newton-Verfahren oder Bisektion lösen. Wenn kein Verkauf: letzten Cashflow um `immobilienEK_N` erhöhen (fiktiver Verkauf zum Buchwert-EK), damit die Rendite den Vermögensaufbau enthält — als „EK-Rendite inkl. Wertzuwachs" labeln.
+
+---
+
+## 4. Ausgabe / UI
+
+### 4.1 Layout
+
+1. **Eingabe-Bereich** oben, in aufklappbaren Gruppen: *Objekt & Kauf*, *AfA*, *Miete*, *Kosten*, *Steuer*, *Annahmen*. Darunter zwei Spalten *Finanzierung A* / *Finanzierung B*.
+2. **KPI-Karten** (Grid, für A und B nebeneinander): Cashflow/Monat Jahr 1, Break-even-Jahr, Restschuld nach N Jahren, Endvermögen nach N Jahren, EK-Rendite p.a.
+3. **Verlaufs-Chart** (Liniendiagramm): Gesamtvermögen A vs. B über die Jahre; optional umschaltbar auf „kumulierter Cashflow" und „Restschuld".
+4. **Jahres-Tabelle** (aufklappbar): pro Jahr Spalten Miete netto, Zins, Tilgung, AfA, Steuer-Effekt, Cashflow n. St., Restschuld, Vermögen — je Szenario umschaltbar oder als zwei Tabellen.
+5. **Fazit-Banner:** vergleicht `endvermögen` (primär) und den Cashflow; nennt die Differenz in € und benennt den Treiber (Steuervorteil, Alternativrendite, Zinsdifferenz).
+6. **Disclaimer** unten: keine Steuer-/Rechtsberatung; Zinsen nur bei Vermietung absetzbar; Werte sind Prognosen.
+
+### 4.2 Formatierung & Verhalten
+
+- Zahlen im `de-DE`-Format, Euro ohne Nachkommastellen (`Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR',maximumFractionDigits:0})`), Prozent mit einer Nachkommastelle.
+- Live-Neuberechnung bei jeder Eingabeänderung (Debounce ~150 ms).
+- Eingabevalidierung: keine negativen Werte außer bei Cashflow-Ergebnissen; EK > Anschaffungskosten → Hinweis; Grenzsteuersatz 0–45 %.
+- Tooltips/Infotexte an erklärungsbedürftigen Feldern: Grenzsteuersatz, AfA-Methode, Alternativrendite, verfügbares Kapital, Spekulationsfrist.
+- Sinnvolle Defaults (siehe Tabellen), damit direkt beim Öffnen ein plausibles Ergebnis erscheint.
+- Barrierefreiheit: Labels mit `for`/`id`, ausreichender Kontrast, Chart mit Text-Alternative (Tabelle).
+- Responsiv: zwei Spalten auf Desktop, gestapelt auf Mobile.
+
+---
+
+## 5. Technische Umsetzung (Empfehlung)
+
+Da das Format offen ist, empfehle ich für maximale Verbreitbarkeit **eine einzelne, in sich geschlossene `index.html`** — kein Build-Schritt, überall einbettbar (eigene Website, `<iframe>`, WordPress-Custom-HTML-Block, GitHub Pages).
+
+- **Struktur:** eine HTML-Datei mit `<style>`, dem Markup und einem `<script>`.
+- **Charts:** Chart.js via CDN (`<script src="https://cdn.jsdelivr.net/npm/chart.js">`). Alternativ reines Canvas/SVG ohne Abhängigkeit.
+- **State:** ein einziges Config-Objekt; eine reine Funktion `berechneSzenario(config, finanzierung) → jahresreihe[]`, zweimal aufgerufen (A/B). Keine globalen Seiteneffekte in der Rechenfunktion → leicht testbar.
+- **Kein Framework nötig.** Wer React bevorzugt: dieselbe `berechneSzenario`-Funktion in einen Hook packen, Inputs als kontrollierte Felder, Recharts statt Chart.js. Die Rechenlogik bleibt identisch.
+- **Persistenz (optional):** Eingaben in der URL als Query-Parameter kodieren → teilbare Links; oder Export als PDF/Druckansicht via `window.print()`.
+
+### 5.1 Empfohlene Funktionssignaturen
+
+```
+berechneVorab(config) → { afaBasis, anschaffungskosten, gebäudeanteil, ... }
+berechneDarlehenJahr(state, finanzierung, jahr) → { zinsJahr, tilgungJahr, restschuldEnde }
+berechneSzenario(config, finanzierung) → Array<{
+    jahr, mietNetto, bewirtschaftung, zins, tilgung, afa,
+    steuerErgebnis, steuerEffekt, cashflowVorSteuer, cashflowNachSteuer,
+    restschuld, immobilienwert, immobilienEK, portfolio, gesamtvermögen
+}>
+berechneKennzahlen(reihe, config, finanzierung) → { cashflowM1, breakEvenJahr, restschuldN, endvermögen, irr }
+formatEUR(n), formatPct(n)
+```
+
+---
+
+## 6. Testfälle zum Validieren (Jahr 1)
+
+Mit diesen Eingaben muss der Rechner näherungsweise (monatliche Zinsberechnung → kleine Abweichungen) folgende Werte liefern. Nutze das als Abnahmekriterium.
+
+**Gemeinsame Annahmen:** Kaufpreis 300.000; Grundstücksanteil 20 %; GrESt 6 %; Notar 1,5 %; Makler 3,57 %; AfA linear 2 %; Kaltmiete 1.000 €/Monat; Leerstand 2 %; Verwaltung 300 + Instandhaltung 1.200; Grenzsteuersatz 42 % (ohne Soli).
+
+Abgeleitet:
+- Kaufnebenkosten = 300.000 × 11,07 % = **33.210 €**
+- Anschaffungskosten = **333.210 €**
+- AfA-Basis = 333.210 × 0,8 = 266.568 €; **AfA/Jahr ≈ 5.331 €**
+- Miete netto Jahr 1 = 12.000 × 0,98 = **11.760 €**
+- Bewirtschaftung = **1.500 €**
+
+**Szenario B** (EK 40.000; Zins 3,9 %; Tilgung 2 %):
+- Darlehen = 333.210 − 40.000 = **293.210 €**
+- Annuität = 293.210 × 5,9 % ≈ 17.299 €/Jahr
+- Zins Jahr 1 ≈ **11.400 €** (monatlich gerechnet etwas unter 293.210 × 3,9 %)
+- Tilgung Jahr 1 ≈ **5.900 €**
+- Werbungskosten ≈ 11.400 + 5.331 + 1.500 = **18.231 €**
+- Steuerl. Ergebnis ≈ 11.760 − 18.231 = **−6.471 €** → Steuererstattung ≈ **2.718 €**
+- Cashflow vor Steuer ≈ 11.760 − 1.500 − 17.299 = **−7.039 €**
+- **Cashflow nach Steuer ≈ −4.321 €/Jahr ≈ −360 €/Monat**
+
+**Szenario A** (EK 100.000; Zins 3,5 %; Tilgung 2 %):
+- Darlehen = **233.210 €**; Annuität = 233.210 × 5,5 % ≈ 12.827 €/Jahr
+- Zins Jahr 1 ≈ **8.100 €**; Tilgung ≈ **4.700 €**
+- Werbungskosten ≈ 8.100 + 5.331 + 1.500 = **14.931 €**
+- Steuerl. Ergebnis ≈ 11.760 − 14.931 = **−3.171 €** → Erstattung ≈ **1.332 €**
+- Cashflow vor Steuer ≈ 11.760 − 1.500 − 12.827 = **−2.567 €**
+- **Cashflow nach Steuer ≈ −1.235 €/Jahr ≈ −103 €/Monat**
+
+Erwartetes qualitatives Ergebnis: Szenario A hat den besseren laufenden Cashflow (weniger Zinslast), Szenario B nutzt den Steuervorteil stärker und hält 60.000 € Kapital frei. Welches am Ende mehr Vermögen aufbaut, hängt an der **Alternativrendite**: Übersteigt sie den effektiven Nachsteuerzins von B (`3,9 % × (1 − 0,42) ≈ 2,26 %`), zieht B über die Jahre im Gesamtvermögen an A vorbei. Genau dieser Umschlagpunkt ist der Kern des Rechners und sollte im Testlauf sichtbar werden, wenn man die Alternativrendite variiert.
+
+---
+
+## 7. Bewusste Vereinfachungen (im UI transparent machen)
+
+- Zinsberechnung monatlich, aber ohne unterjährige Mietsteigerung (jährliche Schritte).
+- Nach der Zinsbindung bleibt die monatliche Rate konstant; reale Anschlussfinanzierungen können abweichen.
+- Erhaltungsaufwand/Modernisierung, Sonder-AfA (z. B. § 7b, Denkmal § 7h/7i) und Einbauten sind nicht abgebildet — als optionale Erweiterung vorsehen.
+- Steuerlicher Verlust wird voll mit anderen Einkünften verrechnet (Regelfall, aber nicht garantiert).
+- Kirchensteuer/Soli nur als grober Aufschlag.
+- Keine Inflationsbereinigung der Endwerte (nominal gerechnet); optionale reale Darstellung möglich.
+
+---
+
+## 7a. Zusatzmodus: EK-Regler (Eigenkapital-Optimum)
+
+Zweite Ansicht **auf derselben `berechneSzenario`-Engine**. Statt zwei diskreter Szenarien A/B: **ein** Objekt, Eigenkapital über einen Regler variabel, Ergebnis als Kurve über der EK-Achse. Beantwortet „wieviel Eigenkapital ist optimal?" statt nur „A oder B?".
+
+### 7a.1 Umschaltung
+
+- Modus-Toggle oben: **„A vs. B"** (Abschnitte 2–6) und **„EK-Optimum"**.
+- Alle gemeinsamen Inputs (Objekt, AfA, Miete, Kosten, Steuer, Annahmen inkl. **Alternativrendite** und **verfügbarem Kapital**) gelten in beiden Modi unverändert.
+
+### 7a.2 Eingaben (nur EK-Modus)
+
+Statt des A/B-Finanzierungsblocks (2.7):
+
+| Feld | Typ | Default | Hinweis |
+|---|---|---|---|
+| Anfängliche Tilgung p.a. | % | 2,0 | für die Annuität |
+| Zinsbindung | Jahre | 10 | wie 2.7 |
+| Anschlusszins p.a. | % | 4,0 | wie 2.7 |
+| EK-Regler | € | — | 0 … verfügbares Kapital; Schrittweite z. B. 5.000 € |
+| **LTV→Zins-Stufen** | Tabelle | s. u. | editierbar; Nutzer-Stufen |
+
+**Sollzins wird nicht eingegeben** — er ergibt sich je EK aus dem Beleihungsauslauf (LTV) über die Stufen-Tabelle. Default-Stufen (editierbar):
+
+| Beleihungsauslauf LTV | Sollzins p.a. |
+|---|---|
+| ≤ 60 % | 3,4 % |
+| ≤ 80 % | 3,6 % |
+| ≤ 90 % | 3,9 % |
+| > 90 % | 4,3 % |
+
+```
+LTV       = darlehen / kaufpreis          // Nebenkosten nicht beleihbar
+sollzins  = erste Stufe mit LTV ≤ stufe.maxLTV   // sonst höchste Stufe
+```
+
+### 7a.3 Berechnung
+
+Für jeden EK-Stützpunkt `ek` im Reglerbereich:
+```
+darlehen  = anschaffungskosten − ek        // wie 2.7; < 0 → 0
+sollzins  = stufe(darlehen / kaufpreis)
+finanzierung = { eigenkapital: ek, sollzins, anfTilgung, zinsbindung, anschlusszins, sondertilgung: 0 }
+reihe     = berechneSzenario(config, finanzierung)   // identische Engine
+kennz     = berechneKennzahlen(reihe, config, finanzierung)
+punkt     = { ek, endvermögen: kennz.endvermögen, irr: kennz.irr }
+```
+
+Stützpunkte über den ganzen Reglerbereich (Schrittweite z. B. 5.000 €) → Kurve.
+
+### 7a.4 Ausgabe (EK-Modus)
+
+- **Kurve** (Chart.js): X = Eigenkapital. Y **umschaltbar**, Default **Endvermögen nach N Jahren**; Zweit-Toggle **EK-Rendite p.a. (IRR)**.
+  - Begründung: Endvermögen hält das verfügbare Kapital konstant und zeigt das echte Optimum (Umschlagpunkt Alternativrendite vs. Nachsteuerzins) als **Maximum** der Kurve. IRR allein trügt — durch den Hebel meist monoton fallend, empfiehlt stumpf minimales EK; daher nur als Sekundärmetrik.
+- **Marker** am aktuellen Reglerpunkt + Optimum-Marker (EK mit maximalem Endvermögen).
+- **Karte** am Reglerpunkt: Darlehen, LTV, resultierender Sollzins, Endvermögen, IRR, Cashflow/Monat Jahr 1.
+- Disclaimer wie A/B-Modus.
+
+### 7a.5 Zusätzliche Funktionssignaturen
+
+```
+stufenZins(ltv, stufen[]) → sollzins
+berechneEKKurve(config, ekModusParams) → Array<{ ek, endvermögen, irr }>
+```
+
+`berechneEKKurve` ruft je Stützpunkt `berechneSzenario` + `berechneKennzahlen` auf — keine neue Rechenlogik, nur Iteration über EK.
+
+---
+
+## 8. Mögliche Erweiterungen (Backlog)
+
+- Drittes Szenario / freie Anzahl.
+- Erhaltungsaufwand pro Jahr + größere Modernisierung in Jahr X.
+- Sonderabschreibungen (§ 7b, Denkmalschutz).
+- Sensitivitäts-Analyse (Slider für Zins, Wertsteigerung, Leerstand → Tornado-Chart).
+- Teilbarer Link via URL-Parameter und PDF-Export.
+- Vergleich gegen „gar nicht kaufen, alles in ETF" als Referenzlinie.
