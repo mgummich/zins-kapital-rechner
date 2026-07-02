@@ -21,6 +21,11 @@
     .modus button { padding: 8px 14px; cursor: pointer; }
     .modus button[aria-pressed="true"] { background: #1a1a1a; color: #fff; }
     #fazit { padding: 12px; border-radius: 8px; background: #eef6ff; margin: var(--gap) 0; }
+    .hilfe { color: #555; font-size: 0.75rem; line-height: 1.4; }
+    #klartext { padding: 10px 12px; border-left: 3px solid #2563eb; background: #f0f6ff; font-size: 0.9rem; margin: var(--gap) 0; }
+    #glossar { margin: var(--gap) 0; }
+    #glossarInhalt dt { font-weight: 600; margin-top: 8px; }
+    #glossarInhalt dd { margin-left: 16px; color: #444; font-size: 0.85rem; }
     .disclaimer { font-size: 0.75rem; color: #666; border-top: 1px solid #ddd; margin-top: 24px; padding-top: 12px; }
     table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
     th, td { border: 1px solid #ddd; padding: 4px 6px; text-align: right; }
@@ -63,9 +68,15 @@
   </form>
 
   <div id="fazit"></div>
+  <p id="klartext"></p>
   <div class="kpis" id="kpis"></div>
   <canvas id="chart" height="120"></canvas>
   <details><summary>Jahres-Tabelle</summary><div id="tabelle"></div></details>
+
+  <details id="glossar">
+    <summary>Begriffe einfach erklärt</summary>
+    <dl id="glossarInhalt"></dl>
+  </details>
 
   <p class="disclaimer">
     Planungswerkzeug, keine Steuer- oder Rechtsberatung. Schuldzinsen sind nur bei
