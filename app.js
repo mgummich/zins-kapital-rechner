@@ -194,14 +194,14 @@ function baueGlossar() {
     .map(([t, d]) => `<dt>${t}</dt><dd>${d}</dd>`).join('');
 }
 
-let chart;
-function zeichneChart(labels, datasets) {
-  const ctx = document.getElementById('chart');
-  if (chart) chart.destroy();
-  chart = new Chart(ctx, { type: 'line', data: { labels, datasets }, options: { responsive: true } });
+const charts = {};
+function zeichneChartEl(id, config) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id), config);
 }
 
 export function renderAB() {
+  document.getElementById('chartBalken').style.display = '';
   const config = leseConfig();
   const rA = berechneSzenario(config, leseFinanzierung('A'));
   const rB = berechneSzenario(config, leseFinanzierung('B'));
@@ -226,10 +226,22 @@ export function renderAB() {
     `Szenario ${sieger} baut nach ${config.jahre} Jahren ${formatEUR(Math.abs(diff))} mehr Vermögen auf (Primärmetrik Endvermögen).${krText}${treiberText}`;
 
   const labels = rA.map((z) => 'J' + z.jahr);
-  zeichneChart(labels, [
-    { label: 'Gesamtvermögen A', data: rA.map((z) => z.gesamtvermögen), borderColor: '#2563eb', tension: 0.1 },
-    { label: 'Gesamtvermögen B', data: rB.map((z) => z.gesamtvermögen), borderColor: '#dc2626', tension: 0.1 },
-  ]);
+  const annA = { label: 'Vermögen A', data: rA.map((z) => z.gesamtvermögen), borderColor: '#2563eb', backgroundColor: '#2563eb22', tension: .15 };
+  const annB = { label: 'Vermögen B', data: rB.map((z) => z.gesamtvermögen), borderColor: '#dc2626', backgroundColor: '#dc262622', tension: .15 };
+  zeichneChartEl('chart', {
+    type: 'line', data: { labels, datasets: [annA, annB] },
+    options: { responsive: true, plugins: { title: { display: true,
+      text: kr === null ? 'Vermögensverlauf A vs. B' : `Vermögensverlauf A vs. B — Umschlagpunkt bei ${formatPct(kr)} Alternativrendite` } },
+      scales: { y: { title: { display: true, text: 'Vermögen (€)' } }, x: { title: { display: true, text: 'Jahr' } } } },
+  });
+  // Balkenvergleich Endvermögen A vs. B
+  zeichneChartEl('chartBalken', {
+    type: 'bar',
+    data: { labels: ['Endvermögen A', 'Endvermögen B'],
+      datasets: [{ label: 'Endvermögen (€)', data: [kA.endvermögen, kB.endvermögen], backgroundColor: ['#2563eb', '#dc2626'] }] },
+    options: { responsive: true, plugins: { legend: { display: false }, title: { display: true, text: 'Endvermögen im Vergleich' } },
+      scales: { y: { title: { display: true, text: '€' } } } },
+  });
 
   document.getElementById('tabelle').innerHTML = tabelleHtml(rB);
 
@@ -281,12 +293,27 @@ function renderEK() {
   document.getElementById('fazit').textContent =
     `Optimales Eigenkapital (max. Endvermögen): ${formatEUR(opt.ek)} → ${formatEUR(opt.endvermögen)}.`;
 
+  document.getElementById('chartBalken').style.display = 'none'; // Balken nur im A/B-Modus
   const labels = kurve.map((p) => formatEUR(p.ek));
-  const data = kurve.map((p) => (metrik === 'irr' ? p.irr * 100 : p.endvermögen));
-  zeichneChart(labels, [{
-    label: metrik === 'irr' ? 'EK-Rendite p.a. (%)' : 'Endvermögen (€)',
-    data, borderColor: '#2563eb', tension: 0.1,
-  }]);
+  if (metrik === 'irr') {
+    zeichneChartEl('chart', {
+      type: 'line', data: { labels, datasets: [{ label: 'EK-Rendite p.a. (%)', data: kurve.map((p) => p.irr * 100), borderColor: '#2563eb', tension: .15 }] },
+      options: { responsive: true, plugins: { title: { display: true, text: 'EK-Rendite je Eigenkapital' } },
+        scales: { y: { title: { display: true, text: '% p.a.' } }, x: { title: { display: true, text: 'Eigenkapital' } } } },
+    });
+  } else {
+    const optIdx = kurve.indexOf(opt);
+    zeichneChartEl('chart', {
+      type: 'line',
+      data: { labels, datasets: [
+        { label: 'Immobilien-Eigenkapital', data: kurve.map((p) => p.immobilienEK), borderColor: '#2563eb', backgroundColor: '#2563eb33', fill: true, stack: 's', tension: .1 },
+        { label: 'Seitenportfolio', data: kurve.map((p) => p.portfolio), borderColor: '#16a34a', backgroundColor: '#16a34a33', fill: true, stack: 's', tension: .1 },
+        { label: 'Optimum', data: kurve.map((p, i) => (i === optIdx ? p.endvermögen : null)), borderColor: '#f59e0b', backgroundColor: '#f59e0b', pointRadius: 6, showLine: false },
+      ] },
+      options: { responsive: true, plugins: { title: { display: true, text: `Endvermögen je Eigenkapital — Optimum bei ${formatEUR(opt.ek)}` } },
+        scales: { y: { stacked: true, title: { display: true, text: 'Vermögen (€)' } }, x: { title: { display: true, text: 'Eigenkapital' } } } },
+    });
+  }
   document.getElementById('tabelle').innerHTML = '';
 
   document.getElementById('klartext').textContent =
