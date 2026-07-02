@@ -1,4 +1,4 @@
-import { berechneSzenario, berechneKennzahlen, berechneEKKurve, berechneVorab, kritischeAltRendite } from './calc.js';
+import { berechneSzenario, berechneKennzahlen, berechneEKKurve, berechneVorab, kritischeAltRendite, stufenZins } from './calc.js';
 import { formatEUR, formatPct } from './format.js';
 
 // Feld-Definitionen: [id, label, default, {pct?, int?}]
@@ -155,8 +155,9 @@ export function renderAB() {
   const diff = kB.endvermögen - kA.endvermögen;
   const sieger = diff >= 0 ? 'B' : 'A';
   const krText = kr === null ? '' : ` Umschlagpunkt bei ${formatPct(kr)} Alternativrendite.`;
+  const treiberText = kr !== null ? ' Treiber: Alternativrendite vs. Nachsteuerzins.' : ' Treiber: Zinsdifferenz und Steuervorteil.';
   document.getElementById('fazit').textContent =
-    `Szenario ${sieger} baut nach ${config.jahre} Jahren ${formatEUR(Math.abs(diff))} mehr Vermögen auf (Primärmetrik Endvermögen).${krText}`;
+    `Szenario ${sieger} baut nach ${config.jahre} Jahren ${formatEUR(Math.abs(diff))} mehr Vermögen auf (Primärmetrik Endvermögen).${krText}${treiberText}`;
 
   const labels = rA.map((z) => 'J' + z.jahr);
   zeichneChart(labels, [
@@ -194,7 +195,7 @@ function renderEK() {
   const darlehen = Math.max(0, anschaffungskosten - ekAktuell);
   const beleihungswert = config.kaufpreis * (1 - params.beleihungswertAbschlag); // F6
   const ltv = beleihungswert > 0 ? darlehen / beleihungswert : 0;
-  const zins = leseStufen().reduce((acc, s) => (acc !== null ? acc : (ltv <= s.maxLTV ? s.zins : null)), null) ?? params.stufen.at(-1).zins;
+  const zins = stufenZins(ltv, params.stufen);
   const fin = { eigenkapital: ekAktuell, sollzins: zins, anfTilgung: params.anfTilgung, zinsbindung: params.zinsbindung, anschlusszins: params.anschlusszins, sondertilgung: 0, finanzierungskosten: 0 };
   const kPunkt = berechneKennzahlen(berechneSzenario(config, fin), config, fin);
 
@@ -236,7 +237,7 @@ function setzeModus(modus) {
 baueFelder();
 baueEKFelder();
 document.getElementById('form').addEventListener('input', neuBerechnen);
-document.getElementById('ekRegler').addEventListener('input', () => aktuellerModus === 'EK' && renderEK());
+document.getElementById('ekRegler').addEventListener('input', (e) => { if (aktuellerModus === 'EK') { e.stopPropagation(); renderEK(); } });
 document.getElementById('modeAB').addEventListener('click', () => setzeModus('AB'));
 document.getElementById('modeEK').addEventListener('click', () => setzeModus('EK'));
 setzeModus('AB');

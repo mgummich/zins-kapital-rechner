@@ -199,14 +199,14 @@ export function kritischeAltRendite(config, finA, finB) {
     return eA - eB;
   };
   let lo = 0, hi = 0.20;
-  const dLo = diff(lo);
+  let dLo = diff(lo);
   if (dLo === 0) return lo;
   if (dLo * diff(hi) > 0) return null; // kein Vorzeichenwechsel → ein Szenario dominiert durchgängig
   for (let i = 0; i < 100; i++) {
     const mid = (lo + hi) / 2;
     const d = diff(mid);
     if (Math.abs(d) < 1) return mid;
-    if (diff(lo) * d < 0) hi = mid; else lo = mid;
+    if (dLo * d < 0) { hi = mid; } else { lo = mid; dLo = d; }
   }
   return (lo + hi) / 2;
 }
