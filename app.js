@@ -91,11 +91,11 @@ function baueFelder() {
   for (const [grp, liste] of Object.entries(felder)) {
     document.getElementById(grp).innerHTML = liste.map(([id, l, d, o]) => feldHtml(id, l, d, o)).join('');
   }
-  const soli = `<label>Soli & Kirchensteuer<select id="soliKirche"><option value="0">Nein</option><option value="1">Ja</option></select>${hilfeHtml('soliKirche')}</label>`;
+  const soli = `<details class="erweitert"><summary>Erweitert</summary><div class="grid"><label>Soli & Kirchensteuer<select id="soliKirche"><option value="0">Nein</option><option value="1">Ja</option></select>${hilfeHtml('soliKirche')}</label></div></details>`;
   document.getElementById('grpSteuer').insertAdjacentHTML('beforeend', soli);
   const afaMethode = `<label>AfA-Methode<select id="afaMethode"><option value="linear">linear</option><option value="degressiv">degressiv 5%</option></select>${hilfeHtml('afaMethode')}</label>`;
   document.getElementById('grpAfa').insertAdjacentHTML('afterbegin', afaMethode);
-  const verkauf = `<label>Verkauf am Ende<select id="verkaufAktiv"><option value="0">Nein</option><option value="1">Ja</option></select>${hilfeHtml('verkaufAktiv')}</label>`;
+  const verkauf = `<details class="erweitert"><summary>Erweiterte Annahmen</summary><div class="grid"><label>Verkauf am Ende<select id="verkaufAktiv"><option value="0">Nein</option><option value="1">Ja</option></select>${hilfeHtml('verkaufAktiv')}</label></div></details>`;
   document.getElementById('grpAnnahmen').insertAdjacentHTML('beforeend', verkauf);
   for (const suffix of ['A', 'B']) {
     const feld = (id, l, i) => `<label>${l}<input id="${id}_${suffix}" type="number" inputmode="decimal" step="any" value="${finDefaults[suffix][i]}" />${hilfeHtml(id)}</label>`;
@@ -193,6 +193,11 @@ function baueGlossar() {
   document.getElementById('glossarInhalt').innerHTML = glossar
     .map(([t, d]) => `<dt>${t}</dt><dd>${d}</dd>`).join('');
 }
+
+// ponytail: dark-mode Chart.js defaults set once at init, before first render
+const _dark = matchMedia('(prefers-color-scheme: dark)').matches;
+Chart.defaults.color = _dark ? '#98a2b3' : '#667085';
+Chart.defaults.borderColor = _dark ? '#2a303b' : '#e4e7ec';
 
 const charts = {};
 function zeichneChartEl(id, config) {
@@ -310,7 +315,7 @@ function renderEK() {
         { label: 'Seitenportfolio', data: kurve.map((p) => p.portfolio), borderColor: '#16a34a', backgroundColor: '#16a34a33', fill: true, stack: 's', tension: .1 },
         { label: 'Optimum', data: kurve.map((p, i) => (i === optIdx ? p.endvermögen : null)), borderColor: '#f59e0b', backgroundColor: '#f59e0b', pointRadius: 6, showLine: false },
       ] },
-      options: { responsive: true, plugins: { title: { display: true, text: `Endvermögen je Eigenkapital — Optimum bei ${formatEUR(opt.ek)}` } },
+      options: { responsive: true, plugins: { title: { display: true, text: config.verkaufAktiv ? `Vermögens-Zusammensetzung (Buchwert) — Optimum bei ${formatEUR(opt.ek)}` : `Endvermögen je Eigenkapital — Optimum bei ${formatEUR(opt.ek)}` } },
         scales: { y: { stacked: true, title: { display: true, text: 'Vermögen (€)' } }, x: { title: { display: true, text: 'Eigenkapital' } } } },
     });
   }
