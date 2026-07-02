@@ -84,7 +84,7 @@ const finFelder = [
 const finDefaults = { A: [100000, 3.5, 2.0, 10, 4.0, 0], B: [40000, 3.9, 2.0, 10, 4.0, 0] };
 
 function feldHtml(id, label, def, opt) {
-  return `<label>${label}<input id="${id}" type="number" step="any" value="${def}" />${hilfeHtml(id)}</label>`;
+  return `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="any" value="${def}" />${hilfeHtml(id)}</label>`;
 }
 
 function baueFelder() {
@@ -98,9 +98,11 @@ function baueFelder() {
   const verkauf = `<label>Verkauf am Ende<select id="verkaufAktiv"><option value="0">Nein</option><option value="1">Ja</option></select>${hilfeHtml('verkaufAktiv')}</label>`;
   document.getElementById('grpAnnahmen').insertAdjacentHTML('beforeend', verkauf);
   for (const suffix of ['A', 'B']) {
-    document.getElementById('grpFin' + suffix).innerHTML = finFelder
-      .map(([id, l], i) => `<label>${l}<input id="${id}_${suffix}" type="number" step="any" value="${finDefaults[suffix][i]}" />${hilfeHtml(id)}</label>`)
-      .join('');
+    const feld = (id, l, i) => `<label>${l}<input id="${id}_${suffix}" type="number" inputmode="decimal" step="any" value="${finDefaults[suffix][i]}" />${hilfeHtml(id)}</label>`;
+    const basis = finFelder.slice(0, 4).map(([id, l], i) => feld(id, l, i)).join('');
+    const erweitert = finFelder.slice(4).map(([id, l], i) => feld(id, l, i + 4)).join('');
+    document.getElementById('grpFin' + suffix).innerHTML =
+      basis + `<details class="erweitert"><summary>Erweitert (Anschluss, Finanzierungskosten)</summary><div class="grid">${erweitert}</div></details>`;
   }
 }
 
@@ -135,13 +137,13 @@ function baueEKFelder() {
     ['ek_zinsbindung', 'Zinsbindung (Jahre)', 10],
     ['ek_anschlusszins', 'Anschlusszins p.a. (%)', 4.0],
     ['ek_beleihungswertAbschlag', 'Beleihungswert-Abschlag (%)', 10],
-  ].map(([id, l, d]) => `<label>${l}<input id="${id}" type="number" step="any" value="${d}" />${hilfeHtml(id)}</label>`).join('');
+  ].map(([id, l, d]) => `<label>${l}<input id="${id}" type="number" inputmode="decimal" step="any" value="${d}" />${hilfeHtml(id)}</label>`).join('');
 
   document.querySelector('#stufenTabelle').insertAdjacentHTML('beforebegin',
     '<small class="hilfe">Beleihungsauslauf (LTV) = Kredit ÷ Beleihungswert. Je höher der Kreditanteil, desto höher der Zins. Diese Tabelle bildet die Zins-Staffel deiner Bank ab — Werte anpassen, falls dein Angebot abweicht.</small>');
 
   document.querySelector('#stufenTabelle tbody').innerHTML = stufenDefault
-    .map((s, i) => `<tr><td><input id="ltv_${i}" type="number" step="any" value="${s.maxLTV === Infinity ? 100 : s.maxLTV * 100}" /></td><td><input id="zins_${i}" type="number" step="any" value="${s.zins}" /></td></tr>`)
+    .map((s, i) => `<tr><td><input id="ltv_${i}" type="number" inputmode="decimal" step="any" value="${s.maxLTV === Infinity ? 100 : s.maxLTV * 100}" /></td><td><input id="zins_${i}" type="number" inputmode="decimal" step="any" value="${s.zins}" /></td></tr>`)
     .join('');
 }
 
@@ -207,12 +209,14 @@ export function renderAB() {
   const kB = berechneKennzahlen(rB, config, leseFinanzierung('B'));
 
   const kr = kritischeAltRendite(config, leseFinanzierung('A'), leseFinanzierung('B'));
-  document.getElementById('kpis').innerHTML = [
+  const kpiDaten = [
     ['Cashflow/Monat J1 A', formatEUR(kA.cashflowM1)], ['Cashflow/Monat J1 B', formatEUR(kB.cashflowM1)],
-    ['Endvermögen A ★', formatEUR(kA.endvermögen)], ['Endvermögen B ★', formatEUR(kB.endvermögen)],
+    ['Endvermögen A ★', formatEUR(kA.endvermögen), true], ['Endvermögen B ★', formatEUR(kB.endvermögen), true],
     ['EK-Rendite A (ergänzend)', formatPct(kA.irr)], ['EK-Rendite B (ergänzend)', formatPct(kB.irr)],
     ['Kritische Alternativrendite (A↔B)', kr === null ? '—' : formatPct(kr)],
-  ].map(([t, v]) => `<div class="kpi">${t}<b>${v}</b></div>`).join('');
+  ];
+  document.getElementById('kpis').innerHTML = kpiDaten
+    .map(([t, v, p]) => `<div class="kpi${p ? ' primär' : ''}">${t}<b>${v}</b></div>`).join('');
 
   const diff = kB.endvermögen - kA.endvermögen;
   const sieger = diff >= 0 ? 'B' : 'A';
@@ -270,9 +274,9 @@ function renderEK() {
 
   document.getElementById('kpis').innerHTML = [
     ['Darlehen', formatEUR(darlehen)], ['LTV', formatPct(ltv)], ['Sollzins', formatPct(zins)],
-    ['Endvermögen', formatEUR(kPunkt.endvermögen)], ['EK-Rendite', formatPct(kPunkt.irr)],
+    ['Endvermögen', formatEUR(kPunkt.endvermögen), true], ['EK-Rendite', formatPct(kPunkt.irr)],
     ['Cashflow/Monat J1', formatEUR(kPunkt.cashflowM1)],
-  ].map(([t, v]) => `<div class="kpi">${t}<b>${v}</b></div>`).join('');
+  ].map(([t, v, p]) => `<div class="kpi${p ? ' primär' : ''}">${t}<b>${v}</b></div>`).join('');
 
   document.getElementById('fazit').textContent =
     `Optimales Eigenkapital (max. Endvermögen): ${formatEUR(opt.ek)} → ${formatEUR(opt.endvermögen)}.`;

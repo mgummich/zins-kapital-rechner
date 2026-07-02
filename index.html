@@ -5,35 +5,66 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Immobilien-Cashflow-Rechner</title>
   <style>
-    :root { --gap: 12px; }
-    body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; max-width: 1100px; margin-inline: auto; color: #1a1a1a; }
-    h1 { font-size: 1.4rem; }
-    fieldset { border: 1px solid #ccc; border-radius: 8px; margin-bottom: var(--gap); }
-    legend { font-weight: 600; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--gap); }
-    label { display: flex; flex-direction: column; font-size: 0.85rem; gap: 2px; }
-    input, select { padding: 6px; font-size: 0.9rem; }
+    :root {
+      --bg: #f6f7f9; --surface: #ffffff; --text: #1a1d24; --muted: #667085;
+      --line: #e4e7ec; --accent: #2563eb; --a: #2563eb; --b: #dc2626;
+      --pos: #16a34a; --neg: #dc2626; --radius: 14px; --gap: 16px;
+      --shadow: 0 1px 3px rgba(16,24,40,.06), 0 1px 2px rgba(16,24,40,.04);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#0f1218; --surface:#171b23; --text:#e6e8ec; --muted:#98a2b3;
+        --line:#2a303b; --shadow:0 1px 3px rgba(0,0,0,.4); }
+    }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      margin: 0; padding: 24px 16px 64px; max-width: 1120px; margin-inline: auto;
+      background: var(--bg); color: var(--text); line-height: 1.5; }
+    h1 { font-size: 1.6rem; letter-spacing: -0.02em; margin: 0 0 4px; }
+    .untertitel { color: var(--muted); margin: 0 0 20px; }
+    fieldset { border: 1px solid var(--line); border-radius: var(--radius);
+      background: var(--surface); box-shadow: var(--shadow); margin-bottom: var(--gap);
+      padding: 16px; }
+    legend { font-weight: 650; padding: 0 6px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--gap); }
+    label { display: flex; flex-direction: column; font-size: .85rem; font-weight: 550; gap: 4px; }
+    input, select { padding: 9px 10px; font-size: .95rem; border: 1px solid var(--line);
+      border-radius: 9px; background: var(--surface); color: var(--text); }
+    input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+    .hilfe { font-weight: 400; font-size: .76rem; color: var(--muted); line-height: 1.35; }
     .szenarien { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
-    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--gap); }
-    .kpi { border: 1px solid #ddd; border-radius: 8px; padding: 10px; }
-    .kpi b { display: block; font-size: 1.15rem; }
-    .modus { display: flex; gap: 8px; margin-bottom: var(--gap); }
-    .modus button { padding: 8px 14px; cursor: pointer; }
-    .modus button[aria-pressed="true"] { background: #1a1a1a; color: #fff; }
-    #fazit { padding: 12px; border-radius: 8px; background: #eef6ff; margin: var(--gap) 0; }
-    .hilfe { color: #555; font-size: 0.75rem; line-height: 1.4; }
-    #klartext { padding: 10px 12px; border-left: 3px solid #2563eb; background: #f0f6ff; font-size: 0.9rem; margin: var(--gap) 0; }
-    #glossar { margin: var(--gap) 0; }
-    #glossarInhalt dt { font-weight: 600; margin-top: 8px; }
-    #glossarInhalt dd { margin-left: 16px; color: #444; font-size: 0.85rem; }
-    .disclaimer { font-size: 0.75rem; color: #666; border-top: 1px solid #ddd; margin-top: 24px; padding-top: 12px; }
-    table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
-    th, td { border: 1px solid #ddd; padding: 4px 6px; text-align: right; }
-    @media (max-width: 700px) { .szenarien { grid-template-columns: 1fr; } }
+    .szenarien h3 { margin: 4px 0 10px; font-size: 1rem; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--gap); margin: var(--gap) 0; }
+    .kpi { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px;
+      background: var(--surface); box-shadow: var(--shadow); font-size: .8rem; color: var(--muted); }
+    .kpi b { display: block; font-size: 1.3rem; color: var(--text); margin-top: 4px; letter-spacing: -0.01em; }
+    .kpi.primär { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
+    .modus { display: inline-flex; gap: 4px; margin-bottom: var(--gap); background: var(--surface);
+      padding: 4px; border-radius: 12px; border: 1px solid var(--line); }
+    .modus button { padding: 8px 16px; cursor: pointer; border: 0; background: transparent;
+      color: var(--muted); border-radius: 9px; font-size: .9rem; font-weight: 600; }
+    .modus button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+    #fazit { padding: 16px; border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+      border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); margin: var(--gap) 0 8px; font-weight: 550; }
+    #klartext { color: var(--muted); margin: 0 0 var(--gap); }
+    canvas { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 12px; box-shadow: var(--shadow); }
+    #glossar { margin-top: 28px; border: 1px solid var(--line); border-radius: var(--radius);
+      background: var(--surface); padding: 12px 16px; }
+    #glossar summary { cursor: pointer; font-weight: 650; }
+    #glossar dt { font-weight: 650; margin-top: 10px; }
+    #glossar dd { margin: 2px 0 0; color: var(--muted); }
+    details.erweitert { grid-column: 1 / -1; }
+    details.erweitert > summary { cursor: pointer; color: var(--muted); font-size: .85rem; margin-bottom: 8px; }
+    table { border-collapse: collapse; width: 100%; font-size: .8rem; }
+    th, td { border: 1px solid var(--line); padding: 5px 7px; text-align: right; }
+    th { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+    .disclaimer { font-size: .75rem; color: var(--muted); border-top: 1px solid var(--line); margin-top: 28px; padding-top: 14px; }
+    @media (max-width: 720px) { .szenarien { grid-template-columns: 1fr; } body { padding: 16px 12px 48px; } }
   </style>
 </head>
 <body>
   <h1>Immobilien-Cashflow-Rechner</h1>
+  <p class="untertitel">Lohnt sich mehr Eigenkapital — oder ein höherer Zins mit Steuervorteil? Vergleich für vermietete Immobilien.</p>
   <div class="modus">
     <button id="modeAB" aria-pressed="true">A vs. B</button>
     <button id="modeEK" aria-pressed="false">EK-Optimum</button>
