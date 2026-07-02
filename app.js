@@ -39,7 +39,9 @@ const hilfe = {
 };
 
 function hilfeHtml(id) {
-  return hilfe[id] ? `<small class="hilfe">${hilfe[id]}</small>` : '';
+  if (!hilfe[id]) return '';
+  const t = hilfe[id].replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  return `<button type="button" class="tip" aria-label="Erklärung: ${t}" data-tip="${t}">i</button>`;
 }
 
 // Feld-Definitionen: [id, label, default, {pct?, int?}]
