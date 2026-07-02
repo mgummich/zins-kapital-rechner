@@ -1289,3 +1289,478 @@ Expected: `HTTP/2 200`. Open the URL, confirm both modes work.
 **Type consistency:** `config`/`finanzierung`/`Zeile`/`stufen` shapes are defined once (Tasks 1/3/4/6) and consumed with matching field names throughout. `berechneKennzahlen` returns `{ cashflowM1, breakEvenJahr, restschuldN, endvermögen, irr }` used consistently in Tasks 8–9. `stufen` items are `{ maxLTV, zins }` everywhere.
 
 **UI test honesty:** Tasks 8–9 have no automated tests (no DOM in node without adding a dependency, which the constraints forbid). The engine — all money math — is fully covered by `node:test`. UI verification is the documented manual browser check. This is called out, not hidden.
+
+---
+
+# v1.4 Extension: Verständlichkeit, Design & Visualisierung
+
+> Implements spec v1.4 §4.3–4.5. Builds on the shipped app (branch off current `main`). Tasks 11, 12, 14 are UI (manual browser check + screenshot; no unit tests per the standing constraint). Task 13 is an engine change (TDD, extends the suite to 22 tests). Base each task on the CURRENT `app.js`/`index.html`/`calc.js` on `main`, not the original Task 8/9 code.
+
+## Global Constraints (v1.4)
+
+- Leitprinzip: eine Person OHNE Immobilien-/Steuervorwissen muss jedes Feld allein korrekt ausfüllen und das Ergebnis in eigenen Worten erklären können.
+- Jedes Eingabefeld (alle in `felder`, `finFelder`, die Select-Felder, die EK-Modus-Felder und die LTV-Stufen) bekommt einen laienverständlichen Hilfetext. Kein Feld ohne Erklärung.
+- Fachbegriffe in Hilfetexten sofort in Klammern erklären. Ton: Alltagssprache, Beispiel/Richtwert nennen.
+- de-DE Format bleibt; Prozentfelder werden als Prozent eingegeben (nicht Dezimal) — Hilfetexte dürfen das nicht widersprechen.
+- Kein Build-Schritt, keine neue Runtime-Dependency. Chart.js (bereits via CDN mit SRI) darf für neue Diagrammtypen genutzt werden.
+- calc.js bleibt PUR (kein DOM/Intl).
+
+---
+
+### Task 11: Feld-Hilfetexte + Glossar + Klartext-Ergebnis
+
+**Files:**
+- Modify: `app.js`
+- Modify: `index.html` (add `#klartext` element and `#glossar` panel)
+
+**Interfaces:**
+- Consumes: existing `felder`, `finFelder`, `renderAB`, `renderEK`, `leseConfig`.
+- Produces: a `hilfe` map (field id → plain-language string), a `hilfeHtml(id)` helper, a `glossar` array rendered into `#glossarInhalt`, and a plain-language sentence written to `#klartext` in both render modes.
+
+- [ ] **Step 1: Add the `hilfe` map to `app.js`** (top level, after the imports)
+
+```js
+// Laienverständliche Hilfetexte je Feld-Id (spec §4.3). Kein Feld ohne Erklärung.
+const hilfe = {
+  kaufpreis: 'Reiner Kaufpreis der Immobilie ohne Nebenkosten. Steht im Kaufvertrag oder Exposé. Beispiel: 300.000 €.',
+  grundstücksanteil: 'Anteil des Preises, der auf Grund und Boden entfällt (nicht abschreibbar) — Rest ist das Gebäude. In Städten oft 30–45 %, auf dem Land weniger. Unsicher? 25 % lassen.',
+  grEStSatz: 'Grunderwerbsteuer — zahlst du einmalig beim Kauf ans Finanzamt. Je Bundesland 3,5 % (Bayern/Sachsen) bis 6,5 % (u. a. NRW). Berlin/Hessen 6 %.',
+  notarSatz: 'Notar und Grundbucheintrag beim Kauf, üblich rund 1,5 % vom Kaufpreis.',
+  maklerSatz: 'Maklerprovision, dein Käuferanteil. Häufig 3,57 %. Ohne Makler: 0.',
+  afaMethode: 'Abschreibungsmethode. „linear" = jedes Jahr gleich viel (Standard). „degressiv" = am Anfang mehr (nur für bestimmte Neubauten). Im Zweifel: linear.',
+  afaSatz: 'AfA = Abschreibung: den Gebäudewert darfst du jährlich steuerlich abziehen, obwohl du nichts zahlst. Altbau ab 1925: 2 %. Vor 1925: 2,5 %. Neubau ab 2023: 3 %.',
+  kaltmieteMonat: 'Monatliche Netto-Kaltmiete (ohne Neben-/Betriebskosten). Aus dem Mietvertrag oder Angebot.',
+  mietsteigerung: 'Wie stark die Miete jährlich steigt (Schätzung). Vorsichtig etwa 1,5 %.',
+  leerstand: 'Anteil der Miete, der durch Leerstand oder Mietausfall wegfällt. Vorsichtig etwa 2 %.',
+  verwaltung: 'Kosten für die Hausverwaltung pro Jahr, die du nicht auf Mieter umlegen kannst (z. B. WEG-Verwalter). Grob 300 €.',
+  instandhaltung: 'Tatsächliche Reparaturen/Instandhaltung pro Jahr — sofort steuerlich absetzbar. Faustregel ~1 €/m²/Monat.',
+  ruecklageZufuehrung: 'Einzahlung in die Erhaltungsrücklage der Eigentümergemeinschaft. Geld fließt ab, ist aber erst absetzbar, wenn die Gemeinschaft es ausgibt — daher separat. Kein Wert? 0.',
+  kostensteigerung: 'Wie stark die laufenden Kosten jährlich steigen. Etwa 1,5 %.',
+  grenzsteuersatz: 'Der Anteil, den du auf jeden zusätzlich verdienten Euro an Steuer zahlst (nicht dein Durchschnitt). Anhalt: ~40.000 € Einkommen → ca. 30 %, ~60.000 € → ca. 42 %. Steht im Steuerbescheid.',
+  soliKirche: 'Soli und Kirchensteuer grob mitrechnen? Soli zahlen seit 2021 nur noch Topverdiener. Im Zweifel: Nein.',
+  jahre: 'Über wie viele Jahre gerechnet wird, z. B. 10, 20 oder 30.',
+  wertsteigerung: 'Wie stark die Immobilie pro Jahr im Wert steigt (Annahme). Vorsichtig etwa 2 %.',
+  altRendite: 'Was dein nicht ins Objekt gestecktes Geld sonst bringen würde — z. B. breit gestreute ETFs langfristig ~5 % nach Steuer. Dieser Wert entscheidet oft, ob mehr oder weniger Eigenkapital lohnt.',
+  sollzinsUnterdeckung: 'Zinssatz, falls dein Puffer aufgebraucht ist und du die monatliche Unterdeckung per Kredit (Dispo/Lombard) decken musst. Realistisch 8–11 %. Verhindert schöngerechnete Ergebnisse.',
+  verfügbaresKapital: 'Wie viel Geld du insgesamt hast (fürs Objekt UND zum Anlegen). Basis für den fairen Vergleich; Eigenkapital je Szenario darf nicht höher sein.',
+  veräußerungskosten: 'Kosten beim späteren Verkauf: Makler, evtl. Vorfälligkeitsentschädigung an die Bank. Nur relevant bei „Verkauf am Ende = Ja". Sonst 0.',
+  verkaufAktiv: 'Soll am Ende des Zeitraums ein Verkauf simuliert werden? (inkl. Steuer bei Verkauf unter 10 Jahren Haltedauer.)',
+  eigenkapital: 'Wie viel eigenes Geld du in dieses Szenario steckst. Der Rest wird über einen Kredit finanziert.',
+  sollzins: 'Zinssatz, den die Bank fürs Darlehen verlangt. Steht im Finanzierungsangebot.',
+  anfTilgung: 'Anfängliche Tilgung — wie viel Prozent des Kredits du im ersten Jahr zurückzahlst. Üblich 2–3 %.',
+  zinsbindung: 'Wie viele Jahre der Zinssatz fest gilt (z. B. 10). Danach gilt ein neuer Zins.',
+  anschlusszins: 'Geschätzter Zinssatz nach Ablauf der Zinsbindung. Unbekannt — vorsichtig etwas höher ansetzen.',
+  finanzierungskosten: 'Einmalige Nebenkosten der Finanzierung (z. B. Disagio, Bereitstellungszinsen). Meist 0.',
+  ek_anfTilgung: 'Anfängliche Tilgung — wie viel Prozent des Kredits du im ersten Jahr zurückzahlst. Üblich 2–3 %.',
+  ek_zinsbindung: 'Wie viele Jahre der Zinssatz fest gilt (z. B. 10).',
+  ek_anschlusszins: 'Geschätzter Zinssatz nach der Zinsbindung. Vorsichtig etwas höher ansetzen.',
+  ek_beleihungswertAbschlag: 'Banken rechnen nicht mit dem Kaufpreis, sondern einem vorsichtigeren Wert (meist ~10 % niedriger). Dadurch ist der Beleihungsauslauf höher und der Zins etwas teurer. Unsicher? 10 % lassen.',
+};
+
+function hilfeHtml(id) {
+  return hilfe[id] ? `<small class="hilfe">${hilfe[id]}</small>` : '';
+}
+```
+
+- [ ] **Step 2: Render the help text under every field**
+
+Replace `feldHtml` and the string-built fields in `app.js` so each carries its help text.
+
+```js
+function feldHtml(id, label, def, opt) {
+  return `<label>${label}<input id="${id}" type="number" step="any" value="${def}" />${hilfeHtml(id)}</label>`;
+}
+```
+
+In `baueFelder`, add the help to the three select fields and the A/B financing inputs:
+
+```js
+  const soli = `<label>Soli & Kirchensteuer<select id="soliKirche"><option value="0">Nein</option><option value="1">Ja</option></select>${hilfeHtml('soliKirche')}</label>`;
+  document.getElementById('grpSteuer').insertAdjacentHTML('beforeend', soli);
+  const afaMethode = `<label>AfA-Methode<select id="afaMethode"><option value="linear">linear</option><option value="degressiv">degressiv 5%</option></select>${hilfeHtml('afaMethode')}</label>`;
+  document.getElementById('grpAfa').insertAdjacentHTML('afterbegin', afaMethode);
+  const verkauf = `<label>Verkauf am Ende<select id="verkaufAktiv"><option value="0">Nein</option><option value="1">Ja</option></select>${hilfeHtml('verkaufAktiv')}</label>`;
+  document.getElementById('grpAnnahmen').insertAdjacentHTML('beforeend', verkauf);
+  for (const suffix of ['A', 'B']) {
+    document.getElementById('grpFin' + suffix).innerHTML = finFelder
+      .map(([id, l], i) => `<label>${l}<input id="${id}_${suffix}" type="number" step="any" value="${finDefaults[suffix][i]}" />${hilfeHtml(id)}</label>`)
+      .join('');
+  }
+```
+
+In `baueEKFelder`, add help to the EK-mode fields and a note above the LTV table:
+
+```js
+  document.getElementById('grpEK').innerHTML = [
+    ['ek_anfTilgung', 'Anf. Tilgung p.a. (%)', 2.0],
+    ['ek_zinsbindung', 'Zinsbindung (Jahre)', 10],
+    ['ek_anschlusszins', 'Anschlusszins p.a. (%)', 4.0],
+    ['ek_beleihungswertAbschlag', 'Beleihungswert-Abschlag (%)', 10],
+  ].map(([id, l, d]) => `<label>${l}<input id="${id}" type="number" step="any" value="${d}" />${hilfeHtml(id)}</label>`).join('');
+```
+
+Add, right after the `#grpEK` line above, a caption for the LTV table (the `#stufenTabelle` already exists in markup):
+
+```js
+  document.querySelector('#stufenTabelle').insertAdjacentHTML('beforebegin',
+    '<small class="hilfe">Beleihungsauslauf (LTV) = Kredit ÷ Beleihungswert. Je höher der Kreditanteil, desto höher der Zins. Diese Tabelle bildet die Zins-Staffel deiner Bank ab — Werte anpassen, falls dein Angebot abweicht.</small>');
+```
+
+- [ ] **Step 3: Add `#klartext` and `#glossar` to `index.html`**
+
+In `index.html`, immediately AFTER the `<div id="fazit"></div>` line add:
+```html
+  <p id="klartext"></p>
+```
+And immediately BEFORE the disclaimer `<p class="disclaimer">` add:
+```html
+  <details id="glossar">
+    <summary>Begriffe einfach erklärt</summary>
+    <dl id="glossarInhalt"></dl>
+  </details>
+```
+
+- [ ] **Step 4: Populate the glossary and the plain-language result in `app.js`**
+
+Add the glossary data and a fill function (call it once during init):
+
+```js
+const glossar = [
+  ['Cashflow', 'Was am Monatsende real übrig bleibt oder fehlt: Miete minus laufende Kosten, Zins und Tilgung, nach Steuer.'],
+  ['Eigenkapital', 'Das eigene Geld, das du einbringst. Der Rest wird über einen Kredit finanziert.'],
+  ['Eigenkapitalrendite (IRR)', 'Verzinsung deines eingesetzten Eigenkapitals pro Jahr über die gesamte Laufzeit. Ergänzende Kennzahl — kann durch Hebel hoch aussehen; maßgeblich ist das Endvermögen.'],
+  ['Endvermögen', 'Was am Ende des Zeitraums insgesamt übrig ist: Wert der Immobilie minus Restschuld plus dein separat angelegtes Geld. Die wichtigste Vergleichszahl.'],
+  ['Restschuld', 'Wie viel vom Kredit nach dem Zeitraum noch offen ist.'],
+  ['Werbungskosten', 'Kosten rund um die Vermietung, die du von der Steuer absetzen darfst (Zinsen, Abschreibung, Verwaltung). Tilgung zählt NICHT dazu.'],
+  ['Spekulationssteuer', 'Steuer auf den Gewinn, wenn du innerhalb von 10 Jahren verkaufst. Nach 10 Jahren steuerfrei.'],
+  ['Kritische Alternativrendite', 'Der Punkt, ab dem sich das Ergebnis dreht: Bringt dein frei angelegtes Geld mehr als diesen Wert, lohnt weniger Eigenkapital; darunter mehr Eigenkapital.'],
+  ['Seitenportfolio', 'Das Geld, das du NICHT ins Objekt steckst und stattdessen anlegst. Macht Szenarien mit unterschiedlichem Eigenkapital fair vergleichbar.'],
+  ['Beleihungsauslauf (LTV)', 'Wie viel Prozent des Beleihungswerts über Kredit finanziert sind. Höher = teurerer Zins.'],
+];
+
+function baueGlossar() {
+  document.getElementById('glossarInhalt').innerHTML = glossar
+    .map(([t, d]) => `<dt>${t}</dt><dd>${d}</dd>`).join('');
+}
+```
+
+At the end of `renderAB` (after the table line), add a plain-language sentence:
+```js
+  const mehrEK = kA.eigenkapital >= kB.eigenkapital ? 'A' : 'B'; // (see note below)
+  const cfBesser = kA.cashflowM1 >= kB.cashflowM1 ? 'A' : 'B';
+  document.getElementById('klartext').textContent =
+    `In Klartext: Szenario ${cfBesser} belastet dich monatlich weniger, Szenario ${sieger} steht nach ${config.jahre} Jahren mit ${formatEUR(Math.abs(diff))} mehr Vermögen da. ` +
+    (kr === null
+      ? 'Über alle hier geprüften Alternativrenditen hinweg gewinnt dasselbe Szenario.'
+      : `Ab einer Alternativrendite von ${formatPct(kr)} dreht sich das Ergebnis: Bringt dein frei angelegtes Geld mehr, lohnt weniger Eigenkapital.`);
+```
+Note: `kA`/`kB` don't expose `eigenkapital`; read it directly instead — replace the `mehrEK` line's source by using `leseFinanzierung('A').eigenkapital` if you need it. The snippet above only uses `cfBesser` and `sieger`, so `mehrEK` can be dropped — remove that unused line.
+
+At the end of `renderEK` (after clearing the table), add:
+```js
+  document.getElementById('klartext').textContent =
+    `In Klartext: Bei ${formatEUR(opt.ek)} Eigenkapital ist dein Endvermögen am größten. Weniger Eigenkapital bedeutet mehr Hebel und mehr frei angelegtes Geld, aber eine höhere monatliche Belastung; mehr Eigenkapital senkt die Rate, bindet aber Kapital.`;
+```
+
+Call `baueGlossar()` in the init block (next to `baueFelder(); baueEKFelder();`).
+
+- [ ] **Step 5: Verify (manual browser check)**
+
+Run: `node --check app.js` (syntax OK). Start `python3 -m http.server 8000`, open the page.
+Expected: every input shows a small help line beneath it; the "Begriffe einfach erklärt" panel expands with all terms; a plain-language sentence appears under the Fazit in both modes; switching modes updates it. Confirm no field is left without help (scan each fieldset). Stop the server.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add app.js index.html
+git commit -m "feat: laienverständliche Feld-Hilfetexte, Glossar, Klartext-Ergebnis (spec §4.3)"
+```
+
+---
+
+### Task 12: Design-Überarbeitung (schön, klar, responsiv, Dark Mode)
+
+**Files:**
+- Modify: `index.html` (`<style>` block; add `inputmode` is done in app.js)
+- Modify: `app.js` (numeric inputs get `inputmode="decimal"`; progressive disclosure for advanced fields)
+
+**Interfaces:**
+- Consumes: existing markup structure (ids/classes unchanged so app.js keeps working). Adds CSS only + `inputmode` + optional `<details>` grouping. Must NOT rename any element id that app.js reads.
+
+- [ ] **Step 1: Replace the `<style>` block in `index.html`** with a modern, accessible design (CSS variables, light/dark via `prefers-color-scheme`, cards, spacing, responsive). Keep all existing selectors that markup uses (`.grid`, `.kpi`, `.modus`, `#fazit`, `.disclaimer`, `.szenarien`, `.kpis`, `table`) and add `.hilfe`, `#klartext`, `#glossar`.
+
+```html
+  <style>
+    :root {
+      --bg: #f6f7f9; --surface: #ffffff; --text: #1a1d24; --muted: #667085;
+      --line: #e4e7ec; --accent: #2563eb; --a: #2563eb; --b: #dc2626;
+      --pos: #16a34a; --neg: #dc2626; --radius: 14px; --gap: 16px;
+      --shadow: 0 1px 3px rgba(16,24,40,.06), 0 1px 2px rgba(16,24,40,.04);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#0f1218; --surface:#171b23; --text:#e6e8ec; --muted:#98a2b3;
+        --line:#2a303b; --shadow:0 1px 3px rgba(0,0,0,.4); }
+    }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      margin: 0; padding: 24px 16px 64px; max-width: 1120px; margin-inline: auto;
+      background: var(--bg); color: var(--text); line-height: 1.5; }
+    h1 { font-size: 1.6rem; letter-spacing: -0.02em; margin: 0 0 4px; }
+    .untertitel { color: var(--muted); margin: 0 0 20px; }
+    fieldset { border: 1px solid var(--line); border-radius: var(--radius);
+      background: var(--surface); box-shadow: var(--shadow); margin-bottom: var(--gap);
+      padding: 16px; }
+    legend { font-weight: 650; padding: 0 6px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--gap); }
+    label { display: flex; flex-direction: column; font-size: .85rem; font-weight: 550; gap: 4px; }
+    input, select { padding: 9px 10px; font-size: .95rem; border: 1px solid var(--line);
+      border-radius: 9px; background: var(--surface); color: var(--text); }
+    input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+    .hilfe { font-weight: 400; font-size: .76rem; color: var(--muted); line-height: 1.35; }
+    .szenarien { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+    .szenarien h3 { margin: 4px 0 10px; font-size: 1rem; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--gap); margin: var(--gap) 0; }
+    .kpi { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px;
+      background: var(--surface); box-shadow: var(--shadow); font-size: .8rem; color: var(--muted); }
+    .kpi b { display: block; font-size: 1.3rem; color: var(--text); margin-top: 4px; letter-spacing: -0.01em; }
+    .kpi.primär { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
+    .modus { display: inline-flex; gap: 4px; margin-bottom: var(--gap); background: var(--surface);
+      padding: 4px; border-radius: 12px; border: 1px solid var(--line); }
+    .modus button { padding: 8px 16px; cursor: pointer; border: 0; background: transparent;
+      color: var(--muted); border-radius: 9px; font-size: .9rem; font-weight: 600; }
+    .modus button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+    #fazit { padding: 16px; border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+      border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); margin: var(--gap) 0 8px; font-weight: 550; }
+    #klartext { color: var(--muted); margin: 0 0 var(--gap); }
+    canvas { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 12px; box-shadow: var(--shadow); }
+    #glossar { margin-top: 28px; border: 1px solid var(--line); border-radius: var(--radius);
+      background: var(--surface); padding: 12px 16px; }
+    #glossar summary { cursor: pointer; font-weight: 650; }
+    #glossar dt { font-weight: 650; margin-top: 10px; }
+    #glossar dd { margin: 2px 0 0; color: var(--muted); }
+    details.erweitert { grid-column: 1 / -1; }
+    details.erweitert > summary { cursor: pointer; color: var(--muted); font-size: .85rem; margin-bottom: 8px; }
+    table { border-collapse: collapse; width: 100%; font-size: .8rem; }
+    th, td { border: 1px solid var(--line); padding: 5px 7px; text-align: right; }
+    th { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+    .disclaimer { font-size: .75rem; color: var(--muted); border-top: 1px solid var(--line); margin-top: 28px; padding-top: 14px; }
+    @media (max-width: 720px) { .szenarien { grid-template-columns: 1fr; } body { padding: 16px 12px 48px; } }
+  </style>
+```
+
+- [ ] **Step 2: Add a subtitle in `index.html`** under the `<h1>` for a more finished look:
+```html
+  <p class="untertitel">Lohnt sich mehr Eigenkapital — oder ein höherer Zins mit Steuervorteil? Vergleich für vermietete Immobilien.</p>
+```
+
+- [ ] **Step 3: `inputmode` + mark the primary KPI in `app.js`**
+
+Give numeric inputs a mobile-friendly keypad. In `feldHtml` and the string-built inputs, add `inputmode="decimal"` to every `<input type="number" ...>`. Example for `feldHtml`:
+```js
+function feldHtml(id, label, def, opt) {
+  return `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="any" value="${def}" />${hilfeHtml(id)}</label>`;
+}
+```
+Do the same for the A/B financing inputs, the EK-mode inputs, and the LTV-stufen inputs.
+
+Mark the Endvermögen KPI cards as primary: in both `renderAB` and `renderEK`, when building the KPI HTML, add the class `primär` to the Endvermögen card(s). Simplest: give each KPI entry an optional flag and render `class="kpi${primär ? ' primär' : ''}"`. In `renderAB`:
+```js
+  const kpiDaten = [
+    ['Cashflow/Monat J1 A', formatEUR(kA.cashflowM1)], ['Cashflow/Monat J1 B', formatEUR(kB.cashflowM1)],
+    ['Endvermögen A ★', formatEUR(kA.endvermögen), true], ['Endvermögen B ★', formatEUR(kB.endvermögen), true],
+    ['EK-Rendite A (ergänzend)', formatPct(kA.irr)], ['EK-Rendite B (ergänzend)', formatPct(kB.irr)],
+    ['Kritische Alternativrendite (A↔B)', kr === null ? '—' : formatPct(kr)],
+  ];
+  document.getElementById('kpis').innerHTML = kpiDaten
+    .map(([t, v, p]) => `<div class="kpi${p ? ' primär' : ''}">${t}<b>${v}</b></div>`).join('');
+```
+Apply the same `[label, value, primär?]` shape + join in `renderEK`, marking the `Endvermögen` card primary.
+
+- [ ] **Step 4: Progressive disclosure for advanced fields in `app.js`**
+
+Wrap rarely-needed fields in a collapsible `<details class="erweitert">` so beginners aren't overwhelmed. Implement for the A/B financing block: split `finFelder` into basic (eigenkapital, sollzins, anfTilgung, zinsbindung) and advanced (anschlusszins, finanzierungskosten), rendering the advanced ones inside a details:
+```js
+  for (const suffix of ['A', 'B']) {
+    const feld = (id, l, i) => `<label>${l}<input id="${id}_${suffix}" type="number" inputmode="decimal" step="any" value="${finDefaults[suffix][i]}" />${hilfeHtml(id)}</label>`;
+    const basis = finFelder.slice(0, 4).map(([id, l], i) => feld(id, l, i)).join('');
+    const erweitert = finFelder.slice(4).map(([id, l], i) => feld(id, l, i + 4)).join('');
+    document.getElementById('grpFin' + suffix).innerHTML =
+      basis + `<details class="erweitert"><summary>Erweitert (Anschluss, Finanzierungskosten)</summary><div class="grid">${erweitert}</div></details>`;
+  }
+```
+(Beginners see the four core fields; the rest is one click away, still with help texts.)
+
+- [ ] **Step 5: Verify (manual browser check + screenshot)**
+
+Run: `node --check app.js`. Start the server, open the page in light and dark mode (OS toggle or devtools emulate). Resize to mobile width.
+Expected: clean modern layout, cards with subtle shadow, Endvermögen cards visually emphasized, readable in dark mode, single-column and usable on mobile, numeric keypad on mobile inputs, advanced financing fields collapsed by default. Take a screenshot for the record. Stop the server.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add index.html app.js
+git commit -m "feat: hochwertiges Design, Dark Mode, Mobile, progressive disclosure (spec §4.4)"
+```
+
+---
+
+### Task 13: Engine — `berechneEKKurve` liefert Vermögens-Zusammensetzung
+
+**Files:**
+- Modify: `calc.js`
+- Modify: `test.mjs`
+
+**Interfaces:**
+- Consumes: existing `berechneEKKurve`, `berechneSzenario`, `berechneKennzahlen`.
+- Produces: each curve point additionally carries `immobilienEK` and `portfolio` (both at year N), so the UI can draw a stacked composition of the wealth. New point shape: `{ ek, endvermögen, irr, immobilienEK, portfolio }`.
+
+- [ ] **Step 1: Write the failing test** (append to `test.mjs`)
+
+```js
+test('berechneEKKurve: Punkte tragen Vermögens-Zusammensetzung', () => {
+  const params = { anfTilgung: 0.02, zinsbindung: 10, anschlusszins: 0.04, stufen, ekMin: 0, ekMax: 100000, schritt: 25000 };
+  const kurve = berechneEKKurve(basisConfig, params);
+  assert.ok(kurve.every((p) => typeof p.immobilienEK === 'number' && typeof p.portfolio === 'number'));
+  // ohne Verkauf: Endvermögen = Immobilien-EK + Portfolio (Buchwert-Vermögen)
+  for (const p of kurve) {
+    assert.ok(Math.abs(p.endvermögen - (p.immobilienEK + p.portfolio)) < 0.01, `Zerlegung bei ek=${p.ek}`);
+  }
+});
+```
+(`stufen` and `basisConfig` are already defined earlier in `test.mjs`.)
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node --test`
+Expected: FAIL — `p.immobilienEK` / `p.portfolio` are `undefined`.
+
+- [ ] **Step 3: Implement** — extend the pushed point in `berechneEKKurve` (`calc.js`)
+
+Locate the loop body's `punkte.push({ ek, endvermögen: k.endvermögen, irr: k.irr });` and replace with:
+```js
+    const letzte = reihe[reihe.length - 1];
+    punkte.push({ ek, endvermögen: k.endvermögen, irr: k.irr, immobilienEK: letzte.immobilienEK, portfolio: letzte.portfolio });
+```
+(The `reihe` variable already exists in that loop from `const reihe = berechneSzenario(config, finanzierung);`.)
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `node --test`
+Expected: PASS (22 tests total). Note: the `endvermögen = immobilienEK + portfolio` identity holds because `berechneEKKurve` runs scenarios with `verkaufAktiv` from `config`; `basisConfig` has `verkaufAktiv: false`, so `endvermögen = gesamtvermögen_N = immobilienEK_N + portfolio_N`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add calc.js test.mjs
+git commit -m "feat: berechneEKKurve liefert Immobilien-EK + Portfolio je Punkt (Viz)"
+```
+
+---
+
+### Task 14: Visualisierung — Balkenvergleich, Umschlagpunkt, Optimum-Marker, gestapelte Zusammensetzung
+
+**Files:**
+- Modify: `app.js`
+
+**Interfaces:**
+- Consumes: `renderAB`, `renderEK`, the new `immobilienEK`/`portfolio` point fields from Task 13, `kritischeAltRendite`. Uses Chart.js (already loaded).
+- Produces: richer charts — consistent A/B colors, a second canvas for the A/B Endvermögen bar comparison, an Umschlagpunkt annotation on the wealth line, and in EK mode an optimum marker plus a stacked-area composition (Immobilien-EK vs. Seitenportfolio) when the Endvermögen metric is shown.
+
+- [ ] **Step 1: Add a second canvas for the bar comparison in `index.html`**
+
+Immediately AFTER the existing `<canvas id="chart" height="120"></canvas>` add:
+```html
+  <canvas id="chartBalken" height="90"></canvas>
+```
+
+- [ ] **Step 2: Generalise the chart helper in `app.js`** to manage two charts and accept a type/options.
+
+Replace the current single-chart helper:
+```js
+const charts = {};
+function zeichneChartEl(id, config) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id), config);
+}
+```
+(Remove the old `let chart; function zeichneChart(...)`. Update its two call sites below.)
+
+- [ ] **Step 3: `renderAB` — consistent colors, Umschlagpunkt marker, bar comparison**
+
+Replace the wealth-line render (the old `zeichneChart(labels, [...])` call) and add the bar chart. Fixed scenario colors: A = `#2563eb`, B = `#dc2626`.
+```js
+  const labels = rA.map((z) => 'J' + z.jahr);
+  const annA = { label: 'Vermögen A', data: rA.map((z) => z.gesamtvermögen), borderColor: '#2563eb', backgroundColor: '#2563eb22', tension: .15 };
+  const annB = { label: 'Vermögen B', data: rB.map((z) => z.gesamtvermögen), borderColor: '#dc2626', backgroundColor: '#dc262622', tension: .15 };
+  zeichneChartEl('chart', {
+    type: 'line', data: { labels, datasets: [annA, annB] },
+    options: { responsive: true, plugins: { title: { display: true,
+      text: kr === null ? 'Vermögensverlauf A vs. B' : `Vermögensverlauf A vs. B — Umschlagpunkt bei ${formatPct(kr)} Alternativrendite` } },
+      scales: { y: { title: { display: true, text: 'Vermögen (€)' } }, x: { title: { display: true, text: 'Jahr' } } } },
+  });
+  // Balkenvergleich Endvermögen A vs. B, Gewinner farbig
+  zeichneChartEl('chartBalken', {
+    type: 'bar',
+    data: { labels: ['Endvermögen A', 'Endvermögen B'],
+      datasets: [{ label: 'Endvermögen (€)', data: [kA.endvermögen, kB.endvermögen], backgroundColor: ['#2563eb', '#dc2626'] }] },
+    options: { responsive: true, plugins: { legend: { display: false }, title: { display: true, text: 'Endvermögen im Vergleich' } },
+      scales: { y: { title: { display: true, text: '€' } } } },
+  });
+```
+(The "Umschlagpunkt" is conveyed in the title — no annotation plugin dependency added, per the no-new-dependency constraint.)
+
+- [ ] **Step 4: `renderEK` — optimum marker + stacked composition**
+
+Replace the EK line render. When the metric is `endvermögen`, draw a stacked area of `immobilienEK` + `portfolio` (so the user sees what the wealth is made of) plus a point dataset marking the optimum; when `irr`, keep a single line. Hide the second bar canvas in EK mode.
+```js
+  document.getElementById('chartBalken').style.display = 'none'; // Balken nur im A/B-Modus
+  const labels = kurve.map((p) => formatEUR(p.ek));
+  if (metrik === 'irr') {
+    zeichneChartEl('chart', {
+      type: 'line', data: { labels, datasets: [{ label: 'EK-Rendite p.a. (%)', data: kurve.map((p) => p.irr * 100), borderColor: '#2563eb', tension: .15 }] },
+      options: { responsive: true, plugins: { title: { display: true, text: 'EK-Rendite je Eigenkapital' } },
+        scales: { y: { title: { display: true, text: '% p.a.' } }, x: { title: { display: true, text: 'Eigenkapital' } } } },
+    });
+  } else {
+    const optIdx = kurve.indexOf(opt);
+    zeichneChartEl('chart', {
+      type: 'line',
+      data: { labels, datasets: [
+        { label: 'Immobilien-Eigenkapital', data: kurve.map((p) => p.immobilienEK), borderColor: '#2563eb', backgroundColor: '#2563eb33', fill: true, stack: 's', tension: .1 },
+        { label: 'Seitenportfolio', data: kurve.map((p) => p.portfolio), borderColor: '#16a34a', backgroundColor: '#16a34a33', fill: true, stack: 's', tension: .1 },
+        { label: 'Optimum', data: kurve.map((p, i) => (i === optIdx ? p.endvermögen : null)), borderColor: '#f59e0b', backgroundColor: '#f59e0b', pointRadius: 6, showLine: false },
+      ] },
+      options: { responsive: true, plugins: { title: { display: true, text: `Endvermögen je Eigenkapital — Optimum bei ${formatEUR(opt.ek)}` } },
+        scales: { y: { stacked: true, title: { display: true, text: 'Vermögen (€)' } }, x: { title: { display: true, text: 'Eigenkapital' } } } },
+    });
+  }
+```
+When switching back to A/B, `renderAB` must re-show the bar canvas — add at the top of `renderAB`:
+```js
+  document.getElementById('chartBalken').style.display = '';
+```
+
+- [ ] **Step 5: Verify (manual browser check + screenshots)**
+
+Run: `node --check app.js`. Start server, open page.
+Expected (A/B): wealth line with axis titles + a title naming the Umschlagpunkt; a bar chart comparing Endvermögen A vs B with A blue / B red. (EK-Optimum, Endvermögen metric): stacked area of Immobilien-EK (blue) + Seitenportfolio (green) over the EK axis, an orange optimum dot at the max; switching the Y-axis dropdown to IRR shows a single line and no bars. Colors for A/B are consistent everywhere. Screenshot both modes. Stop server.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add index.html app.js
+git commit -m "feat: Visualisierung — Balkenvergleich, Umschlagpunkt, EK-Optimum-Marker + Zusammensetzung (spec §4.4)"
+```
+
+---
+
+## v1.4 Extension — Self-Review
+
+**Spec coverage:** §4.3 field help (Task 11 `hilfe` covers every id in `felder`/`finFelder`/selects/EK-fields), glossary + Klartext (Task 11), progressive disclosure (Task 12 Step 4). §4.4 design/dark/mobile (Task 12), visualization — wealth line + Umschlagpunkt + bar + EK optimum marker + stacked composition (Tasks 13–14). §4.5 acceptance = the manual browser checks in Tasks 11/12/14.
+
+**Placeholder scan:** none — help texts and code are complete. One explicit self-correction noted in Task 11 Step 4 (drop the unused `mehrEK` line).
+
+**Type consistency:** Task 13 adds `immobilienEK`/`portfolio` to the curve point; Task 14 consumes exactly those names. KPI render switches to a `[label, value, primär?]` tuple consistently in both modes. Chart helper renamed `zeichneChartEl(id, config)` with both call sites updated.
+
+**UI test honesty:** Tasks 11, 12, 14 are UI — verified by manual browser check + screenshots (documented constraint). Only Task 13 (engine) adds an automated test (→ 22 total).
