@@ -1,6 +1,6 @@
 # Spec: Immobilien-Cashflow-Vergleichsrechner (Kapitalanlage)
 
-**Version:** 1.3
+**Version:** 1.4
 **Zweck:** Ein interaktiver Rechner, der für dieselbe vermietete Immobilie zwei Finanzierungsvarianten gegenüberstellt (z. B. „mehr Eigenkapital, niedriger Zins" vs. „weniger Eigenkapital, höherer Zins") und über einen frei wählbaren Zeitraum den vollständigen Cashflow nach Steuern, die Vermögensentwicklung und die Eigenkapitalrendite berechnet. Kernfrage: **Lohnt sich höheres Eigenkapital, oder ist ein etwas höherer Zins wegen Steuervorteil + freiem Kapital am Ende besser?**
 
 **Zielgruppe der Ausgabe:** Privatanleger:innen in Deutschland mit vermieteter Kapitalanlage-Immobilie.
@@ -263,10 +263,48 @@ Beachte: Die kumulierte AfA mindert die Anschaffungskosten-Basis und **erhöht**
 - Zahlen im `de-DE`-Format, Euro ohne Nachkommastellen (`Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR',maximumFractionDigits:0})`), Prozent mit einer Nachkommastelle.
 - Live-Neuberechnung bei jeder Eingabeänderung (Debounce ~150 ms).
 - Eingabevalidierung: keine negativen Werte außer bei Cashflow-Ergebnissen; EK > Anschaffungskosten → Hinweis; Grenzsteuersatz 0–45 %.
-- Tooltips/Infotexte an erklärungsbedürftigen Feldern: Grenzsteuersatz, AfA-Methode, Alternativrendite, verfügbares Kapital, Spekulationsfrist.
 - Sinnvolle Defaults (siehe Tabellen), damit direkt beim Öffnen ein plausibles Ergebnis erscheint.
 - Barrierefreiheit: Labels mit `for`/`id`, ausreichender Kontrast, Chart mit Text-Alternative (Tabelle).
 - Responsiv: zwei Spalten auf Desktop, gestapelt auf Mobile.
+
+### 4.3 Verständlichkeit & Onboarding (Leitprinzip: „ohne Vorwissen ausfüllbar")
+
+**Grundregel:** Die Zielperson kennt weder Fachbegriffe (AfA, LTV, Werbungskosten, Spekulationsfrist, Annuität, Grenzsteuersatz) noch die typischen Größenordnungen. Jede/r muss den Rechner allein, ohne Beratung, korrekt ausfüllen können. Das ist eine Muss-Anforderung, kein Nice-to-have.
+
+- **Jedes einzelne Eingabefeld** (alle aus Abschnitt 2 und 7a, ausnahmslos) hat neben dem Label ein Info-Element (ⓘ-Icon oder aufklappbarer Hilfetext), das in **einfacher Alltagssprache** erklärt:
+  1. **Was ist das?** — ein Satz ohne Fachjargon (Fachbegriff, falls unvermeidbar, sofort in Klammern erklärt).
+  2. **Wo finde ich den Wert?** — konkrete Quelle (z. B. „steht im Darlehensangebot der Bank", „im Kaufvertrag / Exposé", „Grunderwerbsteuer-Satz deines Bundeslandes – Tabelle im Info-Text").
+  3. **Beispiel/Richtwert** — ein typischer Wert mit kurzer Einordnung („üblich 2–4 %").
+- **Beispieltexte** (Ton und Tiefe verbindlich, wörtliche Umsetzung frei):
+  - *Grenzsteuersatz:* „Der Anteil, den du auf jeden zusätzlich verdienten Euro an Steuer zahlst. Nicht dein Durchschnittssteuersatz. Grober Anhalt: zu versteuerndes Einkommen ~40.000 € → ca. 30 %, ~60.000 € → ca. 42 %. Steht im Steuerbescheid oder per Online-Rechner ermittelbar."
+  - *AfA:* „Abschreibung – du darfst den Gebäudewert über viele Jahre steuerlich abziehen, obwohl du nichts zahlst. Standard bei Altbau ab 1925: 2 % pro Jahr. Bei Neubau ggf. mehr (Auswahl im Feld)."
+  - *Beleihungswert-Abschlag:* „Banken rechnen nicht mit dem Kaufpreis, sondern einem vorsichtigeren Wert (meist ~10 % niedriger). Dadurch ist der ‚Beleihungsauslauf' höher und der Zins etwas teurer. Wenn unsicher: 10 % lassen."
+  - *Alternativrendite:* „Was dein nicht ins Objekt gestecktes Geld sonst bringen würde – z. B. breit gestreute ETFs langfristig ~5 % nach Steuer. Dieser Wert entscheidet oft, ob mehr oder weniger Eigenkapital lohnt."
+- **Glossar / Begriffs-Panel:** ein aufklappbarer Bereich „Begriffe einfach erklärt", der alle Fachbegriffe der Ausgabe (Cashflow, Eigenkapitalrendite/IRR, Endvermögen, Restschuld, Werbungskosten, Spekulationssteuer, kritische Alternativrendite, Seitenportfolio) in 1–2 Sätzen erläutert. Fachbegriffe in KPI-Karten/Fazit verlinken bzw. haben ein ⓘ mit derselben Erklärung.
+- **Ergebnis in Klartext:** zusätzlich zu Zahlen ein bis zwei erklärende Sätze, die das Ergebnis für Laien deuten (z. B. „Mit mehr Eigenkapital zahlst du monatlich X € weniger, baust am Ende aber Y € weniger Vermögen auf, weil dein freies Geld woanders mehr bringt."). Der Fazit-„Treiber" wird laienverständlich benannt.
+- **Progressive Disclosure:** Grundfelder sofort sichtbar; seltene/fortgeschrittene Felder (Anschlusszins, Sondertilgung, Soli/Kirche, Finanzierungskosten, Veräußerungskosten) in aufklappbaren „Erweitert"-Bereichen, damit Einsteiger nicht erschlagen werden. Alle behalten ihre Hilfetexte.
+- **Einheiten & Format sichtbar:** €/%/Jahre klar am Feld; Prozentfelder als Prozent eingeben (nicht Dezimal).
+- **Validierung mit erklärendem Ton:** Fehler-/Hinweistexte sagen, *warum* und *was tun* (z. B. „Eigenkapital höher als Gesamtkosten – dann brauchst du kein Darlehen. Wert reduzieren?"), nicht nur „ungültig".
+
+### 4.4 Design & Visualisierung (Leitprinzip: „wunderschön & sofort verständlich")
+
+- **Anspruch:** klares, modernes, ästhetisch hochwertiges Design – ruhige Typografie, großzügige Abstände, konsistente Farbpalette, abgerundete Karten, dezente Schatten/Akzentfarbe. Kein Formular-Wust, sondern ein einladendes Werkzeug. Hell/Dunkel-Modus wünschenswert.
+- **Visualisierung als Verständnis-Hilfe, nicht Deko:**
+  - Verlaufs-Chart Vermögen A vs. B über die Jahre mit klarer Legende, Achsenbeschriftung in € und Jahren, Tooltip mit Klartext beim Hovern; Umschlagpunkt (kritische Alternativrendite) visuell markiert.
+  - Szenario-Vergleich auch visuell (nicht nur Zahlen): z. B. Balken für Endvermögen A vs. B, farbcodierter „Gewinner".
+  - Im EK-Optimum-Modus: Kurve über der Eigenkapital-Achse mit deutlich markiertem **Optimum-Punkt** und aktuellem Reglerpunkt; optional Aufteilung Immobilien-EK vs. Seitenportfolio als gestapelte Fläche, damit sichtbar ist, woraus das Vermögen besteht.
+  - Sinnvolle Farbsemantik (positiv/negativ, Szenario A/B konsistent überall gleich gefärbt).
+- **KPI-Karten** groß, gut lesbar, Primärmetrik (Endvermögen) visuell hervorgehoben; sekundäre Werte (IRR) dezenter.
+- **Mikro-Interaktionen:** flüssige Live-Aktualisierung von Chart und Karten beim Schieben des Reglers/Ändern von Feldern; sanfte Übergänge.
+- **Mobil-first tauglich:** auf dem Handy vollständig bedien- und lesbar, Chart skaliert, Eingaben mit passenden Zahlentastaturen (`inputmode`).
+
+### 4.5 Abnahmekriterien Verständlichkeit/Design
+
+- Jedes Feld in Abschnitt 2 und 7a hat einen sichtbaren, laienverständlichen Hilfetext (Prüfliste: kein Feld ohne ⓘ/Erklärung).
+- Eine Testperson ohne Immobilien-/Steuervorwissen kann mit den Hilfetexten alle Felder plausibel ausfüllen und das Ergebnis in eigenen Worten erklären.
+- Charts sind ohne Vorwissen deutbar (Achsen, Legende, Klartext-Tooltip vorhanden).
+- Fachbegriffe in der Ausgabe sind per Glossar/ⓘ erklärt.
+- Design wirkt aufgeräumt und hochwertig; responsiv auf Mobil und Desktop; Kontrast/Barrierefreiheit gewahrt.
 
 ---
 
