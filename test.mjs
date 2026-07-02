@@ -200,6 +200,16 @@ test('berechneEKKurve: Stützpunkte über EK-Bereich', () => {
   assert.ok(kurve.every((p) => typeof p.irr === 'number'));
 });
 
+test('berechneEKKurve: Punkte tragen Vermögens-Zusammensetzung', () => {
+  const params = { anfTilgung: 0.02, zinsbindung: 10, anschlusszins: 0.04, stufen, ekMin: 0, ekMax: 100000, schritt: 25000 };
+  const kurve = berechneEKKurve(basisConfig, params);
+  assert.ok(kurve.every((p) => typeof p.immobilienEK === 'number' && typeof p.portfolio === 'number'));
+  // ohne Verkauf: Endvermögen = Immobilien-EK + Portfolio (Buchwert-Vermögen)
+  for (const p of kurve) {
+    assert.ok(Math.abs(p.endvermögen - (p.immobilienEK + p.portfolio)) < 0.01, `Zerlegung bei ek=${p.ek}`);
+  }
+});
+
 export { basisConfig, finA, finB };
 
 import { formatEUR, formatPct } from './format.js';

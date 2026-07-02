@@ -1,6 +1,47 @@
 import { berechneSzenario, berechneKennzahlen, berechneEKKurve, berechneVorab, kritischeAltRendite, stufenZins } from './calc.js';
 import { formatEUR, formatPct } from './format.js';
 
+// Laienverständliche Hilfetexte je Feld-Id (spec §4.3). Kein Feld ohne Erklärung.
+const hilfe = {
+  kaufpreis: 'Reiner Kaufpreis der Immobilie ohne Nebenkosten. Steht im Kaufvertrag oder Exposé. Beispiel: 300.000 €.',
+  grundstücksanteil: 'Anteil des Preises, der auf Grund und Boden entfällt (nicht abschreibbar) — Rest ist das Gebäude. In Städten oft 30–45 %, auf dem Land weniger. Unsicher? 25 % lassen.',
+  grEStSatz: 'Grunderwerbsteuer — zahlst du einmalig beim Kauf ans Finanzamt. Je Bundesland 3,5 % (Bayern/Sachsen) bis 6,5 % (u. a. NRW). Berlin/Hessen 6 %.',
+  notarSatz: 'Notar und Grundbucheintrag beim Kauf, üblich rund 1,5 % vom Kaufpreis.',
+  maklerSatz: 'Maklerprovision, dein Käuferanteil. Häufig 3,57 %. Ohne Makler: 0.',
+  afaMethode: 'Abschreibungsmethode. „linear" = jedes Jahr gleich viel (Standard). „degressiv" = am Anfang mehr (nur für bestimmte Neubauten). Im Zweifel: linear.',
+  afaSatz: 'AfA = Abschreibung: den Gebäudewert darfst du jährlich steuerlich abziehen, obwohl du nichts zahlst. Altbau ab 1925: 2 %. Vor 1925: 2,5 %. Neubau ab 2023: 3 %.',
+  kaltmieteMonat: 'Monatliche Netto-Kaltmiete (ohne Neben-/Betriebskosten). Aus dem Mietvertrag oder Angebot.',
+  mietsteigerung: 'Wie stark die Miete jährlich steigt (Schätzung). Vorsichtig etwa 1,5 %.',
+  leerstand: 'Anteil der Miete, der durch Leerstand oder Mietausfall wegfällt. Vorsichtig etwa 2 %.',
+  verwaltung: 'Kosten für die Hausverwaltung pro Jahr, die du nicht auf Mieter umlegen kannst (z. B. WEG-Verwalter). Grob 300 €.',
+  instandhaltung: 'Tatsächliche Reparaturen/Instandhaltung pro Jahr — sofort steuerlich absetzbar. Faustregel ~1 €/m²/Monat.',
+  ruecklageZufuehrung: 'Einzahlung in die Erhaltungsrücklage der Eigentümergemeinschaft. Geld fließt ab, ist aber erst absetzbar, wenn die Gemeinschaft es ausgibt — daher separat. Kein Wert? 0.',
+  kostensteigerung: 'Wie stark die laufenden Kosten jährlich steigen. Etwa 1,5 %.',
+  grenzsteuersatz: 'Der Anteil, den du auf jeden zusätzlich verdienten Euro an Steuer zahlst (nicht dein Durchschnitt). Anhalt: ~40.000 € Einkommen → ca. 30 %, ~60.000 € → ca. 42 %. Steht im Steuerbescheid.',
+  soliKirche: 'Soli und Kirchensteuer grob mitrechnen? Soli zahlen seit 2021 nur noch Topverdiener. Im Zweifel: Nein.',
+  jahre: 'Über wie viele Jahre gerechnet wird, z. B. 10, 20 oder 30.',
+  wertsteigerung: 'Wie stark die Immobilie pro Jahr im Wert steigt (Annahme). Vorsichtig etwa 2 %.',
+  altRendite: 'Was dein nicht ins Objekt gestecktes Geld sonst bringen würde — z. B. breit gestreute ETFs langfristig ~5 % nach Steuer. Dieser Wert entscheidet oft, ob mehr oder weniger Eigenkapital lohnt.',
+  sollzinsUnterdeckung: 'Zinssatz, falls dein Puffer aufgebraucht ist und du die monatliche Unterdeckung per Kredit (Dispo/Lombard) decken musst. Realistisch 8–11 %. Verhindert schöngerechnete Ergebnisse.',
+  verfügbaresKapital: 'Wie viel Geld du insgesamt hast (fürs Objekt UND zum Anlegen). Basis für den fairen Vergleich; Eigenkapital je Szenario darf nicht höher sein.',
+  veräußerungskosten: 'Kosten beim späteren Verkauf: Makler, evtl. Vorfälligkeitsentschädigung an die Bank. Nur relevant bei „Verkauf am Ende = Ja". Sonst 0.',
+  verkaufAktiv: 'Soll am Ende des Zeitraums ein Verkauf simuliert werden? (inkl. Steuer bei Verkauf unter 10 Jahren Haltedauer.)',
+  eigenkapital: 'Wie viel eigenes Geld du in dieses Szenario steckst. Der Rest wird über einen Kredit finanziert.',
+  sollzins: 'Zinssatz, den die Bank fürs Darlehen verlangt. Steht im Finanzierungsangebot.',
+  anfTilgung: 'Anfängliche Tilgung — wie viel Prozent des Kredits du im ersten Jahr zurückzahlst. Üblich 2–3 %.',
+  zinsbindung: 'Wie viele Jahre der Zinssatz fest gilt (z. B. 10). Danach gilt ein neuer Zins.',
+  anschlusszins: 'Geschätzter Zinssatz nach Ablauf der Zinsbindung. Unbekannt — vorsichtig etwas höher ansetzen.',
+  finanzierungskosten: 'Einmalige Nebenkosten der Finanzierung (z. B. Disagio, Bereitstellungszinsen). Meist 0.',
+  ek_anfTilgung: 'Anfängliche Tilgung — wie viel Prozent des Kredits du im ersten Jahr zurückzahlst. Üblich 2–3 %.',
+  ek_zinsbindung: 'Wie viele Jahre der Zinssatz fest gilt (z. B. 10).',
+  ek_anschlusszins: 'Geschätzter Zinssatz nach der Zinsbindung. Vorsichtig etwas höher ansetzen.',
+  ek_beleihungswertAbschlag: 'Banken rechnen nicht mit dem Kaufpreis, sondern einem vorsichtigeren Wert (meist ~10 % niedriger). Dadurch ist der Beleihungsauslauf höher und der Zins etwas teurer. Unsicher? 10 % lassen.',
+};
+
+function hilfeHtml(id) {
+  return hilfe[id] ? `<small class="hilfe">${hilfe[id]}</small>` : '';
+}
+
 // Feld-Definitionen: [id, label, default, {pct?, int?}]
 const felder = {
   grpObjekt: [
@@ -43,23 +84,25 @@ const finFelder = [
 const finDefaults = { A: [100000, 3.5, 2.0, 10, 4.0, 0], B: [40000, 3.9, 2.0, 10, 4.0, 0] };
 
 function feldHtml(id, label, def, opt) {
-  return `<label>${label}<input id="${id}" type="number" step="any" value="${def}" /></label>`;
+  return `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="any" value="${def}" />${hilfeHtml(id)}</label>`;
 }
 
 function baueFelder() {
   for (const [grp, liste] of Object.entries(felder)) {
     document.getElementById(grp).innerHTML = liste.map(([id, l, d, o]) => feldHtml(id, l, d, o)).join('');
   }
-  const soli = `<label>Soli & Kirchensteuer<select id="soliKirche"><option value="0">Nein</option><option value="1">Ja</option></select></label>`;
+  const soli = `<details class="erweitert"><summary>Erweitert</summary><div class="grid"><label>Soli & Kirchensteuer<select id="soliKirche"><option value="0">Nein</option><option value="1">Ja</option></select>${hilfeHtml('soliKirche')}</label></div></details>`;
   document.getElementById('grpSteuer').insertAdjacentHTML('beforeend', soli);
-  const afaMethode = `<label>AfA-Methode<select id="afaMethode"><option value="linear">linear</option><option value="degressiv">degressiv 5%</option></select></label>`;
+  const afaMethode = `<label>AfA-Methode<select id="afaMethode"><option value="linear">linear</option><option value="degressiv">degressiv 5%</option></select>${hilfeHtml('afaMethode')}</label>`;
   document.getElementById('grpAfa').insertAdjacentHTML('afterbegin', afaMethode);
-  const verkauf = `<label>Verkauf am Ende<select id="verkaufAktiv"><option value="0">Nein</option><option value="1">Ja</option></select></label>`;
+  const verkauf = `<details class="erweitert"><summary>Erweiterte Annahmen</summary><div class="grid"><label>Verkauf am Ende<select id="verkaufAktiv"><option value="0">Nein</option><option value="1">Ja</option></select>${hilfeHtml('verkaufAktiv')}</label></div></details>`;
   document.getElementById('grpAnnahmen').insertAdjacentHTML('beforeend', verkauf);
   for (const suffix of ['A', 'B']) {
-    document.getElementById('grpFin' + suffix).innerHTML = finFelder
-      .map(([id, l], i) => `<label>${l}<input id="${id}_${suffix}" type="number" step="any" value="${finDefaults[suffix][i]}" /></label>`)
-      .join('');
+    const feld = (id, l, i) => `<label>${l}<input id="${id}_${suffix}" type="number" inputmode="decimal" step="any" value="${finDefaults[suffix][i]}" />${hilfeHtml(id)}</label>`;
+    const basis = finFelder.slice(0, 4).map(([id, l], i) => feld(id, l, i)).join('');
+    const erweitert = finFelder.slice(4).map(([id, l], i) => feld(id, l, i + 4)).join('');
+    document.getElementById('grpFin' + suffix).innerHTML =
+      basis + `<details class="erweitert"><summary>Erweitert (Anschluss, Finanzierungskosten)</summary><div class="grid">${erweitert}</div></details>`;
   }
 }
 
@@ -94,10 +137,13 @@ function baueEKFelder() {
     ['ek_zinsbindung', 'Zinsbindung (Jahre)', 10],
     ['ek_anschlusszins', 'Anschlusszins p.a. (%)', 4.0],
     ['ek_beleihungswertAbschlag', 'Beleihungswert-Abschlag (%)', 10],
-  ].map(([id, l, d]) => `<label>${l}<input id="${id}" type="number" step="any" value="${d}" /></label>`).join('');
+  ].map(([id, l, d]) => `<label>${l}<input id="${id}" type="number" inputmode="decimal" step="any" value="${d}" />${hilfeHtml(id)}</label>`).join('');
+
+  document.querySelector('#stufenTabelle').insertAdjacentHTML('beforebegin',
+    '<small class="hilfe">Beleihungsauslauf (LTV) = Kredit ÷ Beleihungswert. Je höher der Kreditanteil, desto höher der Zins. Diese Tabelle bildet die Zins-Staffel deiner Bank ab — Werte anpassen, falls dein Angebot abweicht.</small>');
 
   document.querySelector('#stufenTabelle tbody').innerHTML = stufenDefault
-    .map((s, i) => `<tr><td><input id="ltv_${i}" type="number" step="any" value="${s.maxLTV === Infinity ? 100 : s.maxLTV * 100}" /></td><td><input id="zins_${i}" type="number" step="any" value="${s.zins}" /></td></tr>`)
+    .map((s, i) => `<tr><td><input id="ltv_${i}" type="number" inputmode="decimal" step="any" value="${s.maxLTV === Infinity ? 100 : s.maxLTV * 100}" /></td><td><input id="zins_${i}" type="number" inputmode="decimal" step="any" value="${s.zins}" /></td></tr>`)
     .join('');
 }
 
@@ -130,14 +176,37 @@ export function leseFinanzierung(suffix) {
   };
 }
 
-let chart;
-function zeichneChart(labels, datasets) {
-  const ctx = document.getElementById('chart');
-  if (chart) chart.destroy();
-  chart = new Chart(ctx, { type: 'line', data: { labels, datasets }, options: { responsive: true } });
+const glossar = [
+  ['Cashflow', 'Was am Monatsende real übrig bleibt oder fehlt: Miete minus laufende Kosten, Zins und Tilgung, nach Steuer.'],
+  ['Eigenkapital', 'Das eigene Geld, das du einbringst. Der Rest wird über einen Kredit finanziert.'],
+  ['Eigenkapitalrendite (IRR)', 'Verzinsung deines eingesetzten Eigenkapitals pro Jahr über die gesamte Laufzeit. Ergänzende Kennzahl — kann durch Hebel hoch aussehen; maßgeblich ist das Endvermögen.'],
+  ['Endvermögen', 'Was am Ende des Zeitraums insgesamt übrig ist: Wert der Immobilie minus Restschuld plus dein separat angelegtes Geld. Die wichtigste Vergleichszahl.'],
+  ['Restschuld', 'Wie viel vom Kredit nach dem Zeitraum noch offen ist.'],
+  ['Werbungskosten', 'Kosten rund um die Vermietung, die du von der Steuer absetzen darfst (Zinsen, Abschreibung, Verwaltung). Tilgung zählt NICHT dazu.'],
+  ['Spekulationssteuer', 'Steuer auf den Gewinn, wenn du innerhalb von 10 Jahren verkaufst. Nach 10 Jahren steuerfrei.'],
+  ['Kritische Alternativrendite', 'Der Punkt, ab dem sich das Ergebnis dreht: Bringt dein frei angelegtes Geld mehr als diesen Wert, lohnt weniger Eigenkapital; darunter mehr Eigenkapital.'],
+  ['Seitenportfolio', 'Das Geld, das du NICHT ins Objekt steckst und stattdessen anlegst. Macht Szenarien mit unterschiedlichem Eigenkapital fair vergleichbar.'],
+  ['Beleihungsauslauf (LTV)', 'Wie viel Prozent des Beleihungswerts über Kredit finanziert sind. Höher = teurerer Zins.'],
+];
+
+function baueGlossar() {
+  document.getElementById('glossarInhalt').innerHTML = glossar
+    .map(([t, d]) => `<dt>${t}</dt><dd>${d}</dd>`).join('');
+}
+
+// ponytail: dark-mode Chart.js defaults set once at init, before first render
+const _dark = matchMedia('(prefers-color-scheme: dark)').matches;
+Chart.defaults.color = _dark ? '#98a2b3' : '#667085';
+Chart.defaults.borderColor = _dark ? '#2a303b' : '#e4e7ec';
+
+const charts = {};
+function zeichneChartEl(id, config) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id), config);
 }
 
 export function renderAB() {
+  document.getElementById('chartBalken').style.display = '';
   const config = leseConfig();
   const rA = berechneSzenario(config, leseFinanzierung('A'));
   const rB = berechneSzenario(config, leseFinanzierung('B'));
@@ -145,12 +214,14 @@ export function renderAB() {
   const kB = berechneKennzahlen(rB, config, leseFinanzierung('B'));
 
   const kr = kritischeAltRendite(config, leseFinanzierung('A'), leseFinanzierung('B'));
-  document.getElementById('kpis').innerHTML = [
+  const kpiDaten = [
     ['Cashflow/Monat J1 A', formatEUR(kA.cashflowM1)], ['Cashflow/Monat J1 B', formatEUR(kB.cashflowM1)],
-    ['Endvermögen A ★', formatEUR(kA.endvermögen)], ['Endvermögen B ★', formatEUR(kB.endvermögen)],
+    ['Endvermögen A ★', formatEUR(kA.endvermögen), true], ['Endvermögen B ★', formatEUR(kB.endvermögen), true],
     ['EK-Rendite A (ergänzend)', formatPct(kA.irr)], ['EK-Rendite B (ergänzend)', formatPct(kB.irr)],
     ['Kritische Alternativrendite (A↔B)', kr === null ? '—' : formatPct(kr)],
-  ].map(([t, v]) => `<div class="kpi">${t}<b>${v}</b></div>`).join('');
+  ];
+  document.getElementById('kpis').innerHTML = kpiDaten
+    .map(([t, v, p]) => `<div class="kpi${p ? ' primär' : ''}">${t}<b>${v}</b></div>`).join('');
 
   const diff = kB.endvermögen - kA.endvermögen;
   const sieger = diff >= 0 ? 'B' : 'A';
@@ -160,12 +231,31 @@ export function renderAB() {
     `Szenario ${sieger} baut nach ${config.jahre} Jahren ${formatEUR(Math.abs(diff))} mehr Vermögen auf (Primärmetrik Endvermögen).${krText}${treiberText}`;
 
   const labels = rA.map((z) => 'J' + z.jahr);
-  zeichneChart(labels, [
-    { label: 'Gesamtvermögen A', data: rA.map((z) => z.gesamtvermögen), borderColor: '#2563eb', tension: 0.1 },
-    { label: 'Gesamtvermögen B', data: rB.map((z) => z.gesamtvermögen), borderColor: '#dc2626', tension: 0.1 },
-  ]);
+  const annA = { label: 'Vermögen A', data: rA.map((z) => z.gesamtvermögen), borderColor: '#2563eb', backgroundColor: '#2563eb22', tension: .15 };
+  const annB = { label: 'Vermögen B', data: rB.map((z) => z.gesamtvermögen), borderColor: '#dc2626', backgroundColor: '#dc262622', tension: .15 };
+  zeichneChartEl('chart', {
+    type: 'line', data: { labels, datasets: [annA, annB] },
+    options: { responsive: true, plugins: { title: { display: true,
+      text: kr === null ? 'Vermögensverlauf A vs. B' : `Vermögensverlauf A vs. B — Umschlagpunkt bei ${formatPct(kr)} Alternativrendite` } },
+      scales: { y: { title: { display: true, text: 'Vermögen (€)' } }, x: { title: { display: true, text: 'Jahr' } } } },
+  });
+  // Balkenvergleich Endvermögen A vs. B
+  zeichneChartEl('chartBalken', {
+    type: 'bar',
+    data: { labels: ['Endvermögen A', 'Endvermögen B'],
+      datasets: [{ label: 'Endvermögen (€)', data: [kA.endvermögen, kB.endvermögen], backgroundColor: ['#2563eb', '#dc2626'] }] },
+    options: { responsive: true, plugins: { legend: { display: false }, title: { display: true, text: 'Endvermögen im Vergleich' } },
+      scales: { y: { title: { display: true, text: '€' } } } },
+  });
 
   document.getElementById('tabelle').innerHTML = tabelleHtml(rB);
+
+  const cfBesser = kA.cashflowM1 >= kB.cashflowM1 ? 'A' : 'B';
+  document.getElementById('klartext').textContent =
+    `In Klartext: Szenario ${cfBesser} belastet dich monatlich weniger, Szenario ${sieger} steht nach ${config.jahre} Jahren mit ${formatEUR(Math.abs(diff))} mehr Vermögen da. ` +
+    (kr === null
+      ? 'Über alle hier geprüften Alternativrenditen hinweg gewinnt dasselbe Szenario.'
+      : `Ab einer Alternativrendite von ${formatPct(kr)} dreht sich das Ergebnis: Bringt dein frei angelegtes Geld mehr, lohnt weniger Eigenkapital.`);
 }
 
 function tabelleHtml(reihe) {
@@ -201,20 +291,38 @@ function renderEK() {
 
   document.getElementById('kpis').innerHTML = [
     ['Darlehen', formatEUR(darlehen)], ['LTV', formatPct(ltv)], ['Sollzins', formatPct(zins)],
-    ['Endvermögen', formatEUR(kPunkt.endvermögen)], ['EK-Rendite', formatPct(kPunkt.irr)],
+    ['Endvermögen', formatEUR(kPunkt.endvermögen), true], ['EK-Rendite', formatPct(kPunkt.irr)],
     ['Cashflow/Monat J1', formatEUR(kPunkt.cashflowM1)],
-  ].map(([t, v]) => `<div class="kpi">${t}<b>${v}</b></div>`).join('');
+  ].map(([t, v, p]) => `<div class="kpi${p ? ' primär' : ''}">${t}<b>${v}</b></div>`).join('');
 
   document.getElementById('fazit').textContent =
     `Optimales Eigenkapital (max. Endvermögen): ${formatEUR(opt.ek)} → ${formatEUR(opt.endvermögen)}.`;
 
+  document.getElementById('chartBalken').style.display = 'none'; // Balken nur im A/B-Modus
   const labels = kurve.map((p) => formatEUR(p.ek));
-  const data = kurve.map((p) => (metrik === 'irr' ? p.irr * 100 : p.endvermögen));
-  zeichneChart(labels, [{
-    label: metrik === 'irr' ? 'EK-Rendite p.a. (%)' : 'Endvermögen (€)',
-    data, borderColor: '#2563eb', tension: 0.1,
-  }]);
+  if (metrik === 'irr') {
+    zeichneChartEl('chart', {
+      type: 'line', data: { labels, datasets: [{ label: 'EK-Rendite p.a. (%)', data: kurve.map((p) => p.irr * 100), borderColor: '#2563eb', tension: .15 }] },
+      options: { responsive: true, plugins: { title: { display: true, text: 'EK-Rendite je Eigenkapital' } },
+        scales: { y: { title: { display: true, text: '% p.a.' } }, x: { title: { display: true, text: 'Eigenkapital' } } } },
+    });
+  } else {
+    const optIdx = kurve.indexOf(opt);
+    zeichneChartEl('chart', {
+      type: 'line',
+      data: { labels, datasets: [
+        { label: 'Immobilien-Eigenkapital', data: kurve.map((p) => p.immobilienEK), borderColor: '#2563eb', backgroundColor: '#2563eb33', fill: true, stack: 's', tension: .1 },
+        { label: 'Seitenportfolio', data: kurve.map((p) => p.portfolio), borderColor: '#16a34a', backgroundColor: '#16a34a33', fill: true, stack: 's', tension: .1 },
+        { label: 'Optimum', data: kurve.map((p, i) => (i === optIdx ? p.endvermögen : null)), borderColor: '#f59e0b', backgroundColor: '#f59e0b', pointRadius: 6, showLine: false },
+      ] },
+      options: { responsive: true, plugins: { title: { display: true, text: config.verkaufAktiv ? `Vermögens-Zusammensetzung (Buchwert) — Optimum bei ${formatEUR(opt.ek)}` : `Endvermögen je Eigenkapital — Optimum bei ${formatEUR(opt.ek)}` } },
+        scales: { y: { stacked: true, title: { display: true, text: 'Vermögen (€)' } }, x: { title: { display: true, text: 'Eigenkapital' } } } },
+    });
+  }
   document.getElementById('tabelle').innerHTML = '';
+
+  document.getElementById('klartext').textContent =
+    `In Klartext: Bei ${formatEUR(opt.ek)} Eigenkapital ist dein Endvermögen am größten. Weniger Eigenkapital bedeutet mehr Hebel und mehr frei angelegtes Geld, aber eine höhere monatliche Belastung; mehr Eigenkapital senkt die Rate, bindet aber Kapital.`;
 }
 
 let debounce;
@@ -236,6 +344,7 @@ function setzeModus(modus) {
 
 baueFelder();
 baueEKFelder();
+baueGlossar();
 document.getElementById('form').addEventListener('input', neuBerechnen);
 document.getElementById('ekRegler').addEventListener('input', (e) => { if (aktuellerModus === 'EK') { e.stopPropagation(); renderEK(); } });
 document.getElementById('modeAB').addEventListener('click', () => setzeModus('AB'));
