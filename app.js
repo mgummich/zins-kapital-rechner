@@ -83,6 +83,44 @@ export function leseConfig() {
   };
 }
 
+const stufenDefault = [
+  { maxLTV: 0.60, zins: 3.4 }, { maxLTV: 0.80, zins: 3.6 },
+  { maxLTV: 0.90, zins: 3.9 }, { maxLTV: Infinity, zins: 4.3 },
+];
+
+function baueEKFelder() {
+  document.getElementById('grpEK').innerHTML = [
+    ['ek_anfTilgung', 'Anf. Tilgung p.a. (%)', 2.0],
+    ['ek_zinsbindung', 'Zinsbindung (Jahre)', 10],
+    ['ek_anschlusszins', 'Anschlusszins p.a. (%)', 4.0],
+    ['ek_beleihungswertAbschlag', 'Beleihungswert-Abschlag (%)', 10],
+  ].map(([id, l, d]) => `<label>${l}<input id="${id}" type="number" step="any" value="${d}" /></label>`).join('');
+
+  document.querySelector('#stufenTabelle tbody').innerHTML = stufenDefault
+    .map((s, i) => `<tr><td><input id="ltv_${i}" type="number" step="any" value="${s.maxLTV === Infinity ? 100 : s.maxLTV * 100}" /></td><td><input id="zins_${i}" type="number" step="any" value="${s.zins}" /></td></tr>`)
+    .join('');
+}
+
+function leseStufen() {
+  return stufenDefault.map((_, i) => ({
+    maxLTV: i === stufenDefault.length - 1 ? Infinity : num('ltv_' + i) / 100,
+    zins: num('zins_' + i) / 100,
+  }));
+}
+
+function leseEKParams(config) {
+  return {
+    anfTilgung: num('ek_anfTilgung') / 100,
+    zinsbindung: Math.round(num('ek_zinsbindung')),
+    anschlusszins: num('ek_anschlusszins') / 100,
+    beleihungswertAbschlag: num('ek_beleihungswertAbschlag') / 100,
+    stufen: leseStufen(),
+    ekMin: 0,
+    ekMax: config.verfügbaresKapital,
+    schritt: Math.max(1000, Math.round(config.verfügbaresKapital / 20 / 1000) * 1000),
+  };
+}
+
 export function leseFinanzierung(suffix) {
   return {
     eigenkapital: num('eigenkapital_' + suffix), sollzins: pct('sollzins_' + suffix),
@@ -135,17 +173,70 @@ function tabelleHtml(reihe) {
   return `<table><thead><tr>${kopf.map((k) => `<th>${k}</th>`).join('')}</tr></thead><tbody>${zeilen}</tbody></table>`;
 }
 
-// --- Init & Events (Task 9 ergänzt Modus-Umschaltung) ---
+function renderEK() {
+  const config = leseConfig();
+  const params = leseEKParams(config);
+  const kurve = berechneEKKurve(config, params);
+  const metrik = document.getElementById('ekMetrik').value; // 'endvermögen' | 'irr'
+
+  // Regler an EK-Bereich koppeln
+  const regler = document.getElementById('ekRegler');
+  regler.min = params.ekMin; regler.max = params.ekMax; regler.step = params.schritt;
+  if (!regler.value || regler.value > params.ekMax) regler.value = Math.min(params.ekMax, config.verfügbaresKapital);
+  const ekAktuell = parseFloat(regler.value);
+  document.getElementById('ekWert').textContent = formatEUR(ekAktuell);
+
+  // Optimum (max Endvermögen)
+  const opt = kurve.reduce((a, b) => (b.endvermögen > a.endvermögen ? b : a));
+
+  // Karte am Reglerpunkt
+  const { anschaffungskosten } = berechneVorab(config);
+  const darlehen = Math.max(0, anschaffungskosten - ekAktuell);
+  const beleihungswert = config.kaufpreis * (1 - params.beleihungswertAbschlag); // F6
+  const ltv = beleihungswert > 0 ? darlehen / beleihungswert : 0;
+  const zins = leseStufen().reduce((acc, s) => (acc !== null ? acc : (ltv <= s.maxLTV ? s.zins : null)), null) ?? params.stufen.at(-1).zins;
+  const fin = { eigenkapital: ekAktuell, sollzins: zins, anfTilgung: params.anfTilgung, zinsbindung: params.zinsbindung, anschlusszins: params.anschlusszins, sondertilgung: 0, finanzierungskosten: 0 };
+  const kPunkt = berechneKennzahlen(berechneSzenario(config, fin), config, fin);
+
+  document.getElementById('kpis').innerHTML = [
+    ['Darlehen', formatEUR(darlehen)], ['LTV', formatPct(ltv)], ['Sollzins', formatPct(zins)],
+    ['Endvermögen', formatEUR(kPunkt.endvermögen)], ['EK-Rendite', formatPct(kPunkt.irr)],
+    ['Cashflow/Monat J1', formatEUR(kPunkt.cashflowM1)],
+  ].map(([t, v]) => `<div class="kpi">${t}<b>${v}</b></div>`).join('');
+
+  document.getElementById('fazit').textContent =
+    `Optimales Eigenkapital (max. Endvermögen): ${formatEUR(opt.ek)} → ${formatEUR(opt.endvermögen)}.`;
+
+  const labels = kurve.map((p) => formatEUR(p.ek));
+  const data = kurve.map((p) => (metrik === 'irr' ? p.irr * 100 : p.endvermögen));
+  zeichneChart(labels, [{
+    label: metrik === 'irr' ? 'EK-Rendite p.a. (%)' : 'Endvermögen (€)',
+    data, borderColor: '#2563eb', tension: 0.1,
+  }]);
+  document.getElementById('tabelle').innerHTML = '';
+}
+
 let debounce;
 function neuBerechnen() {
   clearTimeout(debounce);
   debounce = setTimeout(() => { if (aktuellerModus === 'AB') renderAB(); else renderEK(); }, 150);
 }
 
-// ponytail: stub until Task 9 implements EK-Optimum mode
-function renderEK() {}
-
 let aktuellerModus = 'AB';
+function setzeModus(modus) {
+  aktuellerModus = modus;
+  const ab = modus === 'AB';
+  document.getElementById('modeAB').setAttribute('aria-pressed', ab);
+  document.getElementById('modeEK').setAttribute('aria-pressed', !ab);
+  document.getElementById('fsAB').hidden = !ab;
+  document.getElementById('fsEK').hidden = ab;
+  if (ab) renderAB(); else renderEK();
+}
+
 baueFelder();
+baueEKFelder();
 document.getElementById('form').addEventListener('input', neuBerechnen);
-renderAB();
+document.getElementById('ekRegler').addEventListener('input', () => aktuellerModus === 'EK' && renderEK());
+document.getElementById('modeAB').addEventListener('click', () => setzeModus('AB'));
+document.getElementById('modeEK').addEventListener('click', () => setzeModus('EK'));
+setzeModus('AB');
