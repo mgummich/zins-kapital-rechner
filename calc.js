@@ -237,7 +237,8 @@ export function berechneEKKurve(config, ekParams) {
     };
     const reihe = berechneSzenario(config, finanzierung);
     const k = berechneKennzahlen(reihe, config, finanzierung);
-    punkte.push({ ek, endvermögen: k.endvermögen, irr: k.irr });
+    const letzte = reihe[reihe.length - 1];
+    punkte.push({ ek, endvermögen: k.endvermögen, irr: k.irr, immobilienEK: letzte.immobilienEK, portfolio: letzte.portfolio });
   }
   return punkte;
 }
